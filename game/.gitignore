@@ -1,0 +1,93 @@
+############################
+# Build results
+############################
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+Generated/
+
+############################
+# User-specific files
+############################
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+############################
+# Visual Studio
+############################
+.vs/
+*.vscode/
+.vscode/
+.idea/
+
+############################
+# Rider
+############################
+.idea/
+*.sln.iml
+
+############################
+# MonoGame Content Pipeline
+############################
+*.mgcb~
+*.mgcb-editor~
+*.mgbak
+*.tmp
+
+# Content build output (si generas contenido en carpeta separada)
+Content/bin/
+Content/obj/
+
+############################
+# .NET
+############################
+project.lock.json
+project.fragment.lock.json
+artifacts/
+*.nupkg
+*.snupkg
+*.nuspec
+
+############################
+# OS Files
+############################
+.DS_Store
+Thumbs.db
+
+############################
+# Logs
+############################
+*.log
+
+############################
+# Publish output
+############################
+publish/
+*.publishproj
+
+############################
+# JetBrains Rider
+############################
+_ReSharper*/
+*.DotSettings.user
+
+############################
+# DotCover
+############################
+*.dotCover
+
+############################
+# NUnit
+############################
+TestResult.xml
+nunit-*.xml
+
+############################
+# Coverage
+############################
+coverage/
+*.coverage
+*.coveragexml
