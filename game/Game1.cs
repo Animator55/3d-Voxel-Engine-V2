@@ -31,7 +31,7 @@ namespace game
 
         // Configuración
         private const int ChunkSize = 16;
-        private const int LoadDistance = 16;  // 8 chunks en cada dirección = 256 chunks
+        private const int LoadDistance = 7;  // 8 chunks en cada dirección = 256 chunks
 
         // UI Debug
         private SpriteBatch _spriteBatch;

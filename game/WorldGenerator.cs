@@ -4,33 +4,36 @@ using System.Collections.Generic;
 namespace game
 {
     /// <summary>
-    /// Generador procedural de mundo con montañas, bosques y biomas.
+    /// Generador procedural de mundo mejorado.
     /// 
-    /// CARACTERÍSTICAS:
-    /// - Ruido Perlin multicapa (octavas) para terreno variado
-    /// - Biomas: llanuras, colinas, montañas, nieve
-    /// - Cuevas procedurales (ruido 3D)
-    /// - Árboles generados proceduralmente
-    /// - Capas geológicas realistas (piedra, tierra, pasto, nieve)
-    /// - CACHE de bloques globales para evitar regeneración
+    /// MEJORAS RESPECTO A LA V1:
+    /// - Domain warping en generación de biomas (bordes naturales)
+    /// - Ríos procedurales que excavan el terreno
+    /// - 5 variantes de árboles con ramas reales y clusters de hojas
+    /// - Mezcla de alturas con smooth weights entre biomas (evita cortes)
+    /// - Bioma SnowPeaks con nieve en superficie
+    /// - CACHE de bloques global para evitar regeneración
     /// </summary>
     public class WorldGenerator
     {
         private readonly int _seed;
 
         // Configuración de altura
-        private const int SeaLevel    = 10;
-        private const int MaxHeight   = 120;
-        private const int MinHeight   = 16;
+        // SeaLevel:   hasta aquí llega el agua (océanos, ríos, orillas)
+        // BaseHeight: piso del terreno sólido, SIEMPRE > SeaLevel para que haya costa visible
+        private const int SeaLevel   = 30;
+        private const int BaseHeight = 40;
+        private const int MaxHeight  = 120;
+        private const int MinHeight  = 4;
 
-        // Permutation table para Perlin noise (clásico de Ken Perlin)
+        // Permutation table para Perlin noise
         private readonly int[] _perm = new int[512];
 
-        // CACHE de bloques generados (thread-safe)
-        private readonly Dictionary<(int chunkX, int chunkY, int chunkZ), byte[,,]> _blockCache = new();
+        // CACHE de bloques generados
+        private readonly Dictionary<(int, int, int), byte[,,]> _blockCache = new();
         private readonly object _cacheLock = new object();
 
-        public WorldGenerator(int seed = 12345, float scale = 30f, int oceanLevel = 35)
+        public WorldGenerator(int seed = 12345)
         {
             _seed = seed;
             InitPermTable();
@@ -42,11 +45,9 @@ namespace game
 
         private void InitPermTable()
         {
-            // Tabla base de permutaciones (0..255)
             int[] p = new int[256];
             for (int i = 0; i < 256; i++) p[i] = i;
 
-            // Fisher-Yates shuffle con seed
             var rng = new Random(_seed);
             for (int i = 255; i > 0; i--)
             {
@@ -54,19 +55,14 @@ namespace game
                 (p[i], p[j]) = (p[j], p[i]);
             }
 
-            // Duplicar para evitar wrapping
             for (int i = 0; i < 512; i++)
                 _perm[i] = p[i & 255];
         }
 
         // ============================================================
-        //  GENERACIÓN DE CHUNK
+        //  CACHE Y GENERACIÓN DE CHUNK
         // ============================================================
 
-        /// <summary>
-        /// Obtiene bloques del cache, o genera y cachea si no existen.
-        /// THREAD-SAFE: genera en paralelo sin duplicar trabajo.
-        /// </summary>
         public byte[,,] GetOrGenerateChunk(int chunkX, int chunkY, int chunkZ, int chunkSize)
         {
             var key = (chunkX, chunkY, chunkZ);
@@ -77,15 +73,12 @@ namespace game
                     return cached;
             }
 
-            // Generar (fuera del lock para evitar bloqueo)
             byte[,,] blocks = GenerateChunk(chunkX, chunkY, chunkZ, chunkSize);
 
             lock (_cacheLock)
             {
-                // Doble-check: otro thread pudo haber generado mientras esperaba el lock
                 if (_blockCache.TryGetValue(key, out var cached2))
                     return cached2;
-
                 _blockCache[key] = blocks;
             }
 
@@ -100,9 +93,9 @@ namespace game
             int worldY = chunkY * chunkSize;
             int worldZ = chunkZ * chunkSize;
 
-            // Pre-calcular la altura del terreno para cada columna (X,Z) del chunk
-            int[,] heights = new int[chunkSize, chunkSize];
-            BiomeType[,] biomes = new BiomeType[chunkSize, chunkSize];
+            int[,] heights       = new int[chunkSize, chunkSize];
+            BiomeType[,] biomes  = new BiomeType[chunkSize, chunkSize];
+            bool[,] riverMask    = new bool[chunkSize, chunkSize];
 
             for (int bx = 0; bx < chunkSize; bx++)
             {
@@ -112,52 +105,47 @@ namespace game
                     float wz = worldZ + bz;
 
                     biomes[bx, bz]  = GetBiome(wx, wz);
-                    heights[bx, bz] = GetTerrainHeight(wx, wz, biomes[bx, bz]);
+                    heights[bx, bz] = GetTerrainHeight(wx, wz, biomes[bx, bz], out bool isRiver);
+                    riverMask[bx, bz] = isRiver;
                 }
             }
 
-            // Llenar bloques
             for (int bx = 0; bx < chunkSize; bx++)
             {
                 for (int bz = 0; bz < chunkSize; bz++)
                 {
                     int terrainHeight = heights[bx, bz];
                     BiomeType biome   = biomes[bx, bz];
+                    bool isRiver      = riverMask[bx, bz];
 
                     for (int by = 0; by < chunkSize; by++)
                     {
                         int wy = worldY + by;
-
-                        blocks[bx, by, bz] = GetBlockAt(
-                            worldX + bx, wy, worldZ + bz,
-                            terrainHeight, biome);
+                        blocks[bx, by, bz] = GetBlockAt(worldX + bx, wy, worldZ + bz, terrainHeight, biome, isRiver);
                     }
                 }
             }
 
-            // Generar árboles encima del terreno (solo si parte del chunk es cercana a la superficie)
-            PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize, heights, biomes);
+            PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize, heights, biomes, riverMask);
 
             return blocks;
         }
 
         // ============================================================
-        //  BIOMAS
+        //  BIOMAS (con domain warping)
         // ============================================================
 
         private enum BiomeType { Plains, Hills, Mountains, SnowPeaks, Forest }
 
-        /// <summary>
-        /// Determina el bioma en función de dos capas de ruido (temperatura y humedad).
-        /// </summary>
         private BiomeType GetBiome(float wx, float wz)
         {
-            // Ruido de "temperatura" (escala grande)
-            float temp     = OctaveNoise2D(wx, wz, scale: 400f, octaves: 2, persistence: 0.5f, seed: _seed);
-            // Ruido de "altitud / rugosidad"
-            float roughness = OctaveNoise2D(wx, wz, scale: 300f, octaves: 2, persistence: 0.5f, seed: _seed + 1);
+            // Domain warp: desplazar las coordenadas con otro ruido para bordes orgánicos
+            float warpX = OctaveNoise2D(wx, wz, scale: 200f, octaves: 2, persistence: 0.5f, seed: _seed + 500) * 60f;
+            float warpZ = OctaveNoise2D(wx, wz, scale: 200f, octaves: 2, persistence: 0.5f, seed: _seed + 501) * 60f;
 
-            // Normalizar a [0,1]
+            float temp      = OctaveNoise2D(wx + warpX, wz + warpZ, scale: 400f, octaves: 2, persistence: 0.5f, seed: _seed);
+            float roughness = OctaveNoise2D(wx + warpX, wz + warpZ, scale: 300f, octaves: 2, persistence: 0.5f, seed: _seed + 1);
+
             temp      = (temp      + 1f) * 0.5f;
             roughness = (roughness + 1f) * 0.5f;
 
@@ -168,66 +156,120 @@ namespace game
         }
 
         // ============================================================
-        //  ALTURA DEL TERRENO
+        //  ALTURA DEL TERRENO (con mezcla suave y ríos)
         // ============================================================
 
-        private int GetTerrainHeight(float wx, float wz, BiomeType biome)
+        private int GetTerrainHeight(float wx, float wz, BiomeType biome, out bool isRiver)
         {
-            float height;
+            isRiver = false;
 
-            switch (biome)
+            // Calcular altura base para cada tipo y mezclar suavemente
+            // Esto evita los cortes bruscos en los bordes de bioma
+            float h = GetBlendedHeight(wx, wz, biome);
+
+            // Aplicar ríos (solo en biomas planos y con colinas, no en montañas)
+            if (biome == BiomeType.Plains || biome == BiomeType.Hills || biome == BiomeType.Forest)
             {
-                case BiomeType.Plains:
-                    // Llanuras suaves, poca variación
-                    height = OctaveNoise2D(wx, wz, scale: 120f, octaves: 3, persistence: 0.4f, seed: _seed + 10);
-                    height = SeaLevel + 4 + height * 8f;
-                    break;
+                float riverInfluence = GetRiverInfluence(wx, wz, out float riverDepth01);
+                if (riverInfluence > 0f)
+                {
+                    // Excavar por debajo del SeaLevel para que el agua llene el canal
+                    float riverBottom = SeaLevel - 3f;
+                    h = h * (1f - riverInfluence) + riverBottom * riverInfluence;
 
-                case BiomeType.Hills:
-                    // Colinas medianas
-                    height = OctaveNoise2D(wx, wz, scale: 80f,  octaves: 4, persistence: 0.5f, seed: _seed + 20);
-                    height = SeaLevel + 8 + height * 20f;
-                    break;
-
-                case BiomeType.Forest:
-                    // Bosque: ligeramente más alto que llanuras
-                    height = OctaveNoise2D(wx, wz, scale: 100f, octaves: 4, persistence: 0.45f, seed: _seed + 30);
-                    height = SeaLevel + 6 + height * 12f;
-                    break;
-
-                case BiomeType.Mountains:
-                    // Montañas: usar ruido de potencia para picos más pronunciados
-                    float baseM = OctaveNoise2D(wx, wz, scale: 60f, octaves: 6, persistence: 0.55f, seed: _seed + 40);
-                    float ridge = RidgeNoise2D(wx, wz, scale: 50f, octaves: 4, seed: _seed + 41);
-                    height = SeaLevel + 20 + baseM * 35f + ridge * 25f;
-                    break;
-
-                case BiomeType.SnowPeaks:
-                    // Picos nevados: muy altos
-                    float baseS  = OctaveNoise2D(wx, wz, scale: 50f, octaves: 6, persistence: 0.6f, seed: _seed + 50);
-                    float ridgeS = RidgeNoise2D(wx, wz, scale: 40f, octaves: 5, seed: _seed + 51);
-                    height = SeaLevel + 40 + baseS * 40f + ridgeS * 30f;
-                    break;
-
-                default:
-                    height = SeaLevel;
-                    break;
+                    if (riverInfluence > 0.3f)
+                        isRiver = true;
+                }
             }
 
-            return (int)Math.Clamp(height, MinHeight, MaxHeight);
+            return (int)Math.Clamp(h, MinHeight, MaxHeight);
+        }
+
+        /// <summary>
+        /// Mezcla las alturas de biomas adyacentes usando smooth weights,
+        /// evitando cortes bruscos en los bordes. Inspirado en ProceduralGenerator.
+        /// </summary>
+        private float GetBlendedHeight(float wx, float wz, BiomeType biome)
+        {
+            // Muestras de ruido para pesos (mismos que GetBiome pero sin warp para coherencia)
+            float roughness01 = (OctaveNoise2D(wx, wz, scale: 300f, octaves: 2, persistence: 0.5f, seed: _seed + 1) + 1f) * 0.5f;
+            float temp01      = (OctaveNoise2D(wx, wz, scale: 400f, octaves: 2, persistence: 0.5f, seed: _seed) + 1f) * 0.5f;
+
+            // Alturas por tipo — usan BaseHeight como piso, NO SeaLevel
+            // Así el terreno siempre queda por encima del agua
+            float plainsH = BaseHeight + 2f  + OctaveNoise2D(wx, wz, scale: 120f, octaves: 3, persistence: 0.4f,  seed: _seed + 10) * 8f;
+            float hillsH  = BaseHeight + 6f  + OctaveNoise2D(wx, wz, scale: 80f,  octaves: 4, persistence: 0.5f,  seed: _seed + 20) * 20f;
+            float forestH = BaseHeight + 4f  + OctaveNoise2D(wx, wz, scale: 100f, octaves: 4, persistence: 0.45f, seed: _seed + 30) * 12f;
+
+            float baseM   = OctaveNoise2D(wx, wz, scale: 60f, octaves: 6, persistence: 0.55f, seed: _seed + 40);
+            float ridgeM  = RidgeNoise2D(wx, wz, scale: 50f, octaves: 4, seed: _seed + 41);
+            float mountainH = BaseHeight + 16f + baseM * 35f + ridgeM * 25f;
+
+            float baseS   = OctaveNoise2D(wx, wz, scale: 50f, octaves: 6, persistence: 0.6f, seed: _seed + 50);
+            float ridgeS  = RidgeNoise2D(wx, wz, scale: 40f, octaves: 5, seed: _seed + 51);
+            float snowH   = BaseHeight + 36f + baseS * 40f + ridgeS * 30f;
+
+            // Pesos suaves (smooth step) por zona de rugosidad/temperatura
+            float wPlains   = SmoothStep(0.35f, 0.0f,  roughness01) * (temp01 < 0.55f ? 1f : 0f);
+            float wForest   = SmoothStep(0.35f, 0.0f,  roughness01) * (temp01 >= 0.55f ? 1f : 0f);
+            float wHills    = SmoothStep(0.35f, 0.52f, roughness01) * SmoothStep(0.72f, 0.52f, roughness01);
+            float wMountain = SmoothStep(0.52f, 0.72f, roughness01) * (temp01 >= 0.35f ? 1f : 0f);
+            float wSnow     = SmoothStep(0.52f, 0.72f, roughness01) * (temp01 < 0.35f ? 1f : 0f);
+
+            float total = wPlains + wForest + wHills + wMountain + wSnow;
+            if (total < 0.001f) return plainsH;
+
+            return (plainsH * wPlains + forestH * wForest + hillsH * wHills +
+                    mountainH * wMountain + snowH * wSnow) / total;
+        }
+
+        // ============================================================
+        //  RÍOS
+        // ============================================================
+
+        /// <summary>
+        /// Genera una influencia de río [0,1] basada en ridge inverso de fbm.
+        /// Donde el ruido está cerca de 0.5 → canal de río.
+        /// Inspirado directamente en RiverNoise del ProceduralGenerator.
+        /// </summary>
+        private float GetRiverInfluence(float wx, float wz, out float depth01)
+        {
+            // Warp de río para curvas naturales
+            float rwarpX = OctaveNoise2D(wx, wz, scale: 150f, octaves: 2, persistence: 0.5f, seed: _seed + 600) * 30f;
+            float rwarpZ = OctaveNoise2D(wx, wz, scale: 150f, octaves: 2, persistence: 0.5f, seed: _seed + 601) * 30f;
+
+            float n = OctaveNoise2D(wx + rwarpX, wz + rwarpZ, scale: 300f, octaves: 4, persistence: 0.5f, seed: _seed + 700);
+            n = (n + 1f) * 0.5f; // [0,1]
+
+            // El valor absoluto de (n - 0.5) → cercano a 0 = río
+            float riverRaw = 1f - Math.Abs(n * 2f - 1f); // [0,1], pico en n=0.5
+            riverRaw = (float)Math.Pow(riverRaw, 3f);      // Afilar canal
+
+            depth01 = riverRaw;
+
+            // Threshold: solo cavar si riverRaw > 0.7
+            float threshold = 0.70f;
+            if (riverRaw < threshold) return 0f;
+
+            // Normalizar la influencia en el canal
+            return Math.Clamp((riverRaw - threshold) / (1f - threshold), 0f, 1f);
         }
 
         // ============================================================
         //  TIPO DE BLOQUE
         // ============================================================
 
-        private byte GetBlockAt(int wx, int wy, int wz, int terrainHeight, BiomeType biome)
+        private byte GetBlockAt(int wx, int wy, int wz, int terrainHeight, BiomeType biome, bool isRiver)
         {
-            // Por encima del terreno: aire
             if (wy > terrainHeight)
+            {
+                // Rellenar con agua todo lo que quede entre el terreno y el SeaLevel
+                if (wy <= SeaLevel)
+                    return BlockType.Water;
                 return BlockType.Air;
+            }
 
-            // Cuevas (ruido 3D)
+            // Cuevas 3D
             if (wy > 2 && wy < terrainHeight - 2)
             {
                 float cave = OctaveNoise3D(wx, wy, wz, scale: 20f, octaves: 2, persistence: 0.5f, seed: _seed + 99);
@@ -235,18 +277,21 @@ namespace game
                     return BlockType.Air;
             }
 
-            // Capa de superficie según bioma
+            // Superficie
             if (wy == terrainHeight)
             {
+                if (isRiver) return BlockType.Sand;
+
                 return biome switch
                 {
+                    BiomeType.SnowPeaks  => BlockType.Snow,
                     BiomeType.Mountains  => BlockType.Stone,
                     _                    => BlockType.Grass,
                 };
             }
 
-            // Capa de subsuperficie (tierra)
-            int dirtDepth = biome == BiomeType.Mountains || biome == BiomeType.SnowPeaks ? 1 : 3;
+            // Subsuperficie
+            int dirtDepth = (biome == BiomeType.Mountains || biome == BiomeType.SnowPeaks) ? 1 : 3;
             if (wy >= terrainHeight - dirtDepth)
             {
                 return biome switch
@@ -257,259 +302,407 @@ namespace game
                 };
             }
 
-            // Capa de piedra
-            if (wy < terrainHeight - dirtDepth)
-            {
-                // Venas de minerales ocasionales
-                return BlockType.Stone;
-            }
-
             return BlockType.Stone;
         }
 
         // ============================================================
-        //  ÁRBOLES
+        //  ÁRBOLES (5 variantes con ramas y clusters de hojas)
+        //  Inspirado en TreeGenerator del ProceduralGenerator.
         // ============================================================
 
-        /// <summary>
-        /// Siembra árboles en posiciones pseudoaleatorias dentro del chunk.
-        /// Solo en biomas Plains y Forest, y solo si el bloque de superficie está en este chunk.
-        /// </summary>
+        // Cada variante: (tronco[], ramas[], puntasDeRama[])
+        // Las coordenadas son offset desde la base del árbol (0,0,0)
+
+        // --- Variante 0: Árbol redondeado estándar ---
+        private static readonly (int, int, int)[] _trunk0 =
+        {
+            (0,0,0),(0,1,0),(0,2,0),(0,3,0),(0,4,0),(0,5,0),
+        };
+        private static readonly (int, int, int)[] _branches0 = { };
+        private static readonly (int, int, int)[] _tips0 =
+        {
+            (0,5,0),(1,5,0),(-1,5,0),(0,5,1),(0,5,-1),
+            (0,6,0),(1,6,0),(-1,6,0),(0,6,1),(0,6,-1),
+        };
+
+        // --- Variante 1: Copa ancha baja ---
+        private static readonly (int, int, int)[] _trunk1 =
+        {
+            (0,0,0),(0,1,0),(0,2,0),(0,3,0),(0,4,0),(0,5,0),(0,6,0),
+        };
+        private static readonly (int, int, int)[] _branches1 =
+        {
+            (1,4,0),(2,4,0),(3,4,0),(-1,4,0),(-2,4,0),(-3,4,0),
+            (0,4,1),(0,4,2),(0,4,3),(0,4,-1),(0,4,-2),(0,4,-3),
+            (2,5,2),(-2,5,2),(2,5,-2),(-2,5,-2),
+        };
+        private static readonly (int, int, int)[] _tips1 =
+        {
+            (3,4,0),(-3,4,0),(0,4,3),(0,4,-3),
+            (2,5,2),(-2,5,2),(2,5,-2),(-2,5,-2),
+            (1,6,0),(-1,6,0),(0,6,1),(0,6,-1),(0,6,0),
+        };
+
+        // --- Variante 2: Árbol torcido ---
+        private static readonly (int, int, int)[] _trunk2 =
+        {
+            (0,0,0),(0,1,0),(0,2,0),
+            (1,3,0),(1,4,0),(2,5,0),(2,6,0),(2,7,1),(2,8,1),
+        };
+        private static readonly (int, int, int)[] _branches2 =
+        {
+            (-1,3,0),(-2,4,0),(-3,4,-1),
+            (3,5,0),(4,6,0),(5,6,1),
+            (3,7,1),(4,7,1),(3,8,2),
+        };
+        private static readonly (int, int, int)[] _tips2 =
+        {
+            (-3,4,-1),(5,6,1),(3,8,2),
+            (2,8,2),(1,8,1),(3,8,0),(2,9,1),
+        };
+
+        // --- Variante 3: Copa densa alta ---
+        private static readonly (int, int, int)[] _trunk3 =
+        {
+            (0,0,0),(0,1,0),(0,2,0),(0,3,0),(0,4,0),(0,5,0),
+            (0,6,0),(0,7,0),(0,8,0),(0,9,0),(0,10,0),
+        };
+        private static readonly (int, int, int)[] _branches3 =
+        {
+            (1,6,0),(2,6,0),(3,6,1),(-1,6,0),(-2,6,0),(-3,6,-1),
+            (0,6,1),(0,6,2),(1,6,3),(0,6,-1),(0,6,-2),
+            (1,8,0),(2,8,0),(-1,8,0),(-2,8,0),(0,8,1),(0,8,-1),
+            (1,10,0),(-1,10,0),(0,10,1),(0,10,-1),
+        };
+        private static readonly (int, int, int)[] _tips3 =
+        {
+            (3,6,1),(-3,6,-1),(1,6,3),
+            (2,8,0),(-2,8,0),(0,8,1),(0,8,-1),(2,8,2),(-2,8,2),
+            (1,10,0),(-1,10,0),(0,10,1),(0,10,-1),(0,10,0),
+        };
+
+        // --- Variante 4: Árbol bajo extendido ---
+        private static readonly (int, int, int)[] _trunk4 =
+        {
+            (0,0,0),(0,1,0),(0,2,0),(1,3,1),(1,4,1),
+        };
+        private static readonly (int, int, int)[] _branches4 =
+        {
+            (2,3,0),(3,3,0),(4,3,1),(-1,3,0),(-2,3,0),(-3,3,-1),
+            (0,3,2),(0,3,3),(1,3,4),
+            (2,4,0),(3,4,0),(-1,4,0),(-2,4,0),(0,4,2),(0,4,3),
+        };
+        private static readonly (int, int, int)[] _tips4 =
+        {
+            (4,3,1),(-3,3,-1),(1,3,4),
+            (3,4,0),(-2,4,0),(0,4,3),
+            (2,5,1),(-1,5,1),(1,5,2),(0,5,0),
+        };
+
+        // Cluster de hojas alrededor de cada punta de rama
+        private static readonly (int, int, int)[] _leafCluster =
+        {
+            (0,0,0),
+            (1,0,0),(-1,0,0),(0,0,1),(0,0,-1),(0,1,0),(0,-1,0),
+            (1,1,0),(-1,1,0),(0,1,1),(0,1,-1),
+            (2,0,0),(-2,0,0),(0,0,2),(0,0,-2),
+            (1,0,1),(-1,0,1),(1,0,-1),(-1,0,-1),
+            (1,2,0),(-1,2,0),(0,2,1),(0,2,-1),
+        };
+
+        private struct TreeVariant
+        {
+            public (int, int, int)[] Trunk;
+            public (int, int, int)[] Branches;
+            public (int, int, int)[] Tips;
+        }
+
+        private static readonly TreeVariant[] _treeVariants =
+        {
+            new TreeVariant { Trunk = _trunk0, Branches = _branches0, Tips = _tips0 },
+            new TreeVariant { Trunk = _trunk1, Branches = _branches1, Tips = _tips1 },
+            new TreeVariant { Trunk = _trunk2, Branches = _branches2, Tips = _tips2 },
+            new TreeVariant { Trunk = _trunk3, Branches = _branches3, Tips = _tips3 },
+            new TreeVariant { Trunk = _trunk4, Branches = _branches4, Tips = _tips4 },
+        };
+
         private void PlaceTrees(
             byte[,,] blocks,
             int worldX, int worldY, int worldZ,
             int chunkSize,
             int[,] heights,
-            BiomeType[,] biomes)
+            BiomeType[,] biomes,
+            bool[,] riverMask)
         {
-            // Densidad según bioma
-            // Usamos una cuadrícula de 5x5 con offset aleatorio para evitar patrones regulares
             const int gridSize = 5;
 
             for (int gx = 0; gx < chunkSize / gridSize + 1; gx++)
             {
                 for (int gz = 0; gz < chunkSize / gridSize + 1; gz++)
                 {
-                    // Hash determinístico para esta celda
-                    int cellWorldX = worldX + gx * gridSize;
-                    int cellWorldZ = worldZ + gz * gridSize;
+                    int cellWX = worldX + gx * gridSize;
+                    int cellWZ = worldZ + gz * gridSize;
 
-                    float chance = Hash2Df(cellWorldX, cellWorldZ, _seed + 200);
+                    float chance = Hash2Df(cellWX, cellWZ, _seed + 200);
 
-                    // Offset dentro de la celda
-                    int offX = (int)(Hash2Df(cellWorldX, cellWorldZ, _seed + 201) * (gridSize - 1));
-                    int offZ = (int)(Hash2Df(cellWorldX, cellWorldZ, _seed + 202) * (gridSize - 1));
+                    int offX = (int)(Hash2Df(cellWX, cellWZ, _seed + 201) * (gridSize - 1));
+                    int offZ = (int)(Hash2Df(cellWX, cellWZ, _seed + 202) * (gridSize - 1));
 
                     int localX = gx * gridSize + offX;
                     int localZ = gz * gridSize + offZ;
 
                     if (localX >= chunkSize || localZ >= chunkSize) continue;
 
+                    // No plantar en ríos
+                    if (riverMask[localX, localZ]) continue;
+
                     BiomeType biome = biomes[localX, localZ];
 
-                    // Probabilidad de árbol según bioma
                     float treeProbability = biome switch
                     {
                         BiomeType.Forest => 0.55f,
-                        BiomeType.Plains => 0.12f,
-                        BiomeType.Hills  => 0.20f,
+                        BiomeType.Plains => 0.10f,
+                        BiomeType.Hills  => 0.18f,
                         _                => 0f,
                     };
 
                     if (chance > treeProbability) continue;
 
-                    // Colocar tronco + copa en coordenadas locales del chunk
-                    int treeBase = heights[localX, localZ] + 1;  // encima del suelo
-                    int treeHeight = 4 + (int)(Hash2Df(cellWorldX + 1, cellWorldZ + 1, _seed + 203) * 3);
+                    int treeBase = heights[localX, localZ] + 1;
+                    int localBaseY = treeBase - worldY;
 
-                    PlaceTree(blocks, localX, treeBase - worldY, localZ, treeHeight, chunkSize);
+                    // Seleccionar variante por posición (determinístico)
+                    int variantIdx = (int)(Hash2Df(cellWX + 5, cellWZ + 5, _seed + 210) * _treeVariants.Length);
+                    variantIdx = Math.Clamp(variantIdx, 0, _treeVariants.Length - 1);
+
+                    PlaceTreeVariant(blocks, localX, localBaseY, localZ, variantIdx, chunkSize);
                 }
             }
         }
 
-        private void PlaceTree(byte[,,] blocks, int lx, int ly, int lz, int height, int size)
+        private void PlaceTreeVariant(byte[,,] blocks, int lx, int ly, int lz, int variantIdx, int size)
         {
+            ref readonly var variant = ref _treeVariants[variantIdx];
+
             // Tronco
-            for (int i = 0; i < height; i++)
+            foreach (var (dx, dy, dz) in variant.Trunk)
             {
-                int by = ly + i;
-                if (by >= 0 && by < size)
-                    blocks[lx, by, lz] = BlockType.Wood;
+                int bx = lx + dx, by = ly + dy, bz = lz + dz;
+                if (InBounds(bx, by, bz, size))
+                    blocks[bx, by, bz] = BlockType.Wood;
             }
 
-            // Copa esférica encima del tronco
-            int crownCenter = ly + height;
-            int crownRadius = 2;
-
-            for (int dx = -crownRadius; dx <= crownRadius; dx++)
+            // Ramas (también madera)
+            foreach (var (dx, dy, dz) in variant.Branches)
             {
-                for (int dy = -1; dy <= crownRadius; dy++)
+                int bx = lx + dx, by = ly + dy, bz = lz + dz;
+                if (InBounds(bx, by, bz, size))
+                    blocks[bx, by, bz] = BlockType.Wood;
+            }
+
+            // Hojas: cluster alrededor de cada punta de rama
+            foreach (var (tx, ty, tz) in variant.Tips)
+            {
+                foreach (var (cx, cy, cz) in _leafCluster)
                 {
-                    for (int dz = -crownRadius; dz <= crownRadius; dz++)
+                    int bx = lx + tx + cx;
+                    int by = ly + ty + cy;
+                    int bz = lz + tz + cz;
+
+                    if (!InBounds(bx, by, bz, size)) continue;
+                    if (blocks[bx, by, bz] == BlockType.Wood) continue;
+                    blocks[bx, by, bz] = BlockType.Leaves;
+                }
+            }
+        }
+
+        private static bool InBounds(int x, int y, int z, int size) =>
+            x >= 0 && x < size && y >= 0 && y < size && z >= 0 && z < size;
+
+        // ============================================================
+        //  LOD SIMPLIFICADO
+        // ============================================================
+
+        public byte[,,] GenerateLowPolyChunk(int chunkX, int chunkY, int chunkZ, int chunkSize, int depthLayers = 1)
+        {
+            byte[,,] blocks = new byte[chunkSize, chunkSize, chunkSize];
+
+            int worldX = chunkX * chunkSize;
+            int worldY = chunkY * chunkSize;
+            int worldZ = chunkZ * chunkSize;
+
+            int[,] heights      = new int[chunkSize, chunkSize];
+            BiomeType[,] biomes = new BiomeType[chunkSize, chunkSize];
+            bool[,] riverMask   = new bool[chunkSize, chunkSize];
+
+            for (int bx = 0; bx < chunkSize; bx++)
+            {
+                for (int bz = 0; bz < chunkSize; bz++)
+                {
+                    float wx = worldX + bx;
+                    float wz = worldZ + bz;
+                    biomes[bx, bz]    = GetBiome(wx, wz);
+                    heights[bx, bz]   = GetTerrainHeight(wx, wz, biomes[bx, bz], out bool isRiver);
+                    riverMask[bx, bz] = isRiver;
+                }
+            }
+
+            for (int bx = 0; bx < chunkSize; bx++)
+            {
+                for (int bz = 0; bz < chunkSize; bz++)
+                {
+                    int terrainHeight = heights[bx, bz];
+                    BiomeType biome   = biomes[bx, bz];
+                    bool isRiver      = riverMask[bx, bz];
+
+                    for (int by = 0; by < chunkSize; by++)
                     {
-                        if (dx * dx + dy * dy + dz * dz > crownRadius * crownRadius + 1)
-                            continue;
-
-                        int bx = lx + dx;
-                        int by = crownCenter + dy;
-                        int bz = lz + dz;
-
-                        if (bx < 0 || bx >= size || by < 0 || by >= size || bz < 0 || bz >= size)
-                            continue;
-
-                        // No reemplazar tronco
-                        if (blocks[bx, by, bz] == BlockType.Wood) continue;
-
-                        blocks[bx, by, bz] = BlockType.Grass;
+                        int wy = worldY + by;
+                        if (wy >= terrainHeight - 8 && wy <= terrainHeight)
+                        {
+                            blocks[bx, by, bz] = wy == terrainHeight
+                                ? GetSurfaceBlock(biome, isRiver)
+                                : BlockType.Dirt;
+                        }
+                        else if (wy <= SeaLevel && wy > terrainHeight)
+                        {
+                            blocks[bx, by, bz] = BlockType.Water;
+                        }
                     }
                 }
             }
+
+            PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize, heights, biomes, riverMask);
+            return blocks;
+        }
+
+        private byte GetSurfaceBlock(BiomeType biome, bool isRiver)
+        {
+            if (isRiver) return BlockType.Sand;
+            return biome switch
+            {
+                BiomeType.SnowPeaks => BlockType.Snow,
+                BiomeType.Mountains => BlockType.Stone,
+                _                   => BlockType.Grass,
+            };
+        }
+
+        public int[,] GenerateVeryLowPolyChunk(int chunkX, int chunkY, int chunkZ, int chunkSize)
+        {
+            int[,] heightMap = new int[chunkSize, chunkSize];
+            int worldX = chunkX * chunkSize;
+            int worldZ = chunkZ * chunkSize;
+
+            for (int bx = 0; bx < chunkSize; bx++)
+            {
+                for (int bz = 0; bz < chunkSize; bz++)
+                {
+                    float wx = worldX + bx;
+                    float wz = worldZ + bz;
+                    BiomeType biome = GetBiome(wx, wz);
+                    heightMap[bx, bz] = GetTerrainHeight(wx, wz, biome, out _);
+                }
+            }
+
+            return heightMap;
         }
 
         // ============================================================
         //  RUIDO PERLIN 2D / 3D
         // ============================================================
 
-        /// <summary>
-        /// Ruido Perlin clásico 2D (implementación de Ken Perlin).
-        /// Retorna valores en aproximadamente [-1, 1].
-        /// </summary>
         private float Perlin2D(float x, float y)
         {
             int X = (int)Math.Floor(x) & 255;
             int Y = (int)Math.Floor(y) & 255;
-
             x -= (float)Math.Floor(x);
             y -= (float)Math.Floor(y);
-
-            float u = Fade(x);
-            float v = Fade(y);
-
-            int a  = _perm[X]     + Y;
-            int aa = _perm[a];
-            int ab = _perm[a + 1];
-            int b  = _perm[X + 1] + Y;
-            int ba = _perm[b];
-            int bb = _perm[b + 1];
-
-            return Lerp(
-                Lerp(Grad2(aa, x,     y),     Grad2(ba, x - 1, y),     u),
-                Lerp(Grad2(ab, x,     y - 1), Grad2(bb, x - 1, y - 1), u),
-                v);
+            float u = Fade(x), v = Fade(y);
+            int a  = _perm[X] + Y,     aa = _perm[a],     ab = _perm[a + 1];
+            int b  = _perm[X + 1] + Y, ba = _perm[b],     bb = _perm[b + 1];
+            return Lerp(Lerp(Grad2(aa, x, y),     Grad2(ba, x-1, y),     u),
+                        Lerp(Grad2(ab, x, y-1),   Grad2(bb, x-1, y-1),   u), v);
         }
 
-        /// <summary>
-        /// Ruido Perlin clásico 3D.
-        /// </summary>
         private float Perlin3D(float x, float y, float z)
         {
             int X = (int)Math.Floor(x) & 255;
             int Y = (int)Math.Floor(y) & 255;
             int Z = (int)Math.Floor(z) & 255;
-
             x -= (float)Math.Floor(x);
             y -= (float)Math.Floor(y);
             z -= (float)Math.Floor(z);
-
-            float u = Fade(x);
-            float v = Fade(y);
-            float w = Fade(z);
-
-            int a  = _perm[X]     + Y; int aa = _perm[a] + Z; int ab = _perm[a + 1] + Z;
-            int b  = _perm[X + 1] + Y; int ba = _perm[b] + Z; int bb = _perm[b + 1] + Z;
-
+            float u = Fade(x), v = Fade(y), w = Fade(z);
+            int a  = _perm[X]+Y;   int aa = _perm[a]+Z;   int ab = _perm[a+1]+Z;
+            int b  = _perm[X+1]+Y; int ba = _perm[b]+Z;   int bb = _perm[b+1]+Z;
             return Lerp(
-                Lerp(
-                    Lerp(Grad3(aa,     x,     y,     z    ), Grad3(ba,     x - 1, y,     z    ), u),
-                    Lerp(Grad3(ab,     x,     y - 1, z    ), Grad3(bb,     x - 1, y - 1, z    ), u),
-                    v),
-                Lerp(
-                    Lerp(Grad3(aa + 1, x,     y,     z - 1), Grad3(ba + 1, x - 1, y,     z - 1), u),
-                    Lerp(Grad3(ab + 1, x,     y - 1, z - 1), Grad3(bb + 1, x - 1, y - 1, z - 1), u),
-                    v),
-                w);
+                Lerp(Lerp(Grad3(aa,   x,   y,   z),   Grad3(ba,   x-1,y,  z),   u),
+                     Lerp(Grad3(ab,   x,   y-1, z),   Grad3(bb,   x-1,y-1,z),   u), v),
+                Lerp(Lerp(Grad3(aa+1, x,   y,   z-1), Grad3(ba+1, x-1,y,  z-1), u),
+                     Lerp(Grad3(ab+1, x,   y-1, z-1), Grad3(bb+1, x-1,y-1,z-1), u), v), w);
         }
 
-        /// <summary>Octavas de ruido Perlin 2D para mayor detalle.</summary>
         private float OctaveNoise2D(float x, float z, float scale, int octaves, float persistence, int seed)
         {
-            float total     = 0f;
-            float frequency = 1f / scale;
-            float amplitude = 1f;
-            float maxValue  = 0f;
-
-            // Desplazamiento por seed para independencia entre llamadas
+            float total = 0f, frequency = 1f / scale, amplitude = 1f, maxVal = 0f;
             float ox = (seed * 0.13f) % 1000f;
             float oz = (seed * 0.17f) % 1000f;
-
             for (int i = 0; i < octaves; i++)
             {
                 total    += Perlin2D((x + ox) * frequency, (z + oz) * frequency) * amplitude;
-                maxValue += amplitude;
+                maxVal   += amplitude;
                 amplitude *= persistence;
                 frequency *= 2f;
             }
-
-            return total / maxValue;
+            return total / maxVal;
         }
 
-        /// <summary>Octavas de ruido Perlin 3D.</summary>
         private float OctaveNoise3D(float x, float y, float z, float scale, int octaves, float persistence, int seed)
         {
-            float total     = 0f;
-            float frequency = 1f / scale;
-            float amplitude = 1f;
-            float maxValue  = 0f;
-
+            float total = 0f, frequency = 1f / scale, amplitude = 1f, maxVal = 0f;
             float ox = (seed * 0.13f) % 1000f;
             float oy = (seed * 0.19f) % 1000f;
             float oz = (seed * 0.17f) % 1000f;
-
             for (int i = 0; i < octaves; i++)
             {
-                total    += Perlin3D((x + ox) * frequency, (y + oy) * frequency, (z + oz) * frequency) * amplitude;
-                maxValue += amplitude;
+                total    += Perlin3D((x+ox)*frequency, (y+oy)*frequency, (z+oz)*frequency) * amplitude;
+                maxVal   += amplitude;
                 amplitude *= persistence;
                 frequency *= 2f;
             }
-
-            return total / maxValue;
+            return total / maxVal;
         }
 
-        /// <summary>
-        /// Ridge noise: invierte el ruido para crear crestas de montaña pronunciadas.
-        /// </summary>
         private float RidgeNoise2D(float x, float z, float scale, int octaves, int seed)
         {
-            float total     = 0f;
-            float frequency = 1f / scale;
-            float amplitude = 1f;
-            float maxValue  = 0f;
-
+            float total = 0f, frequency = 1f / scale, amplitude = 1f, maxVal = 0f;
             float ox = (seed * 0.11f) % 1000f;
             float oz = (seed * 0.23f) % 1000f;
-
             for (int i = 0; i < octaves; i++)
             {
                 float n = Perlin2D((x + ox) * frequency, (z + oz) * frequency);
-                n = 1f - Math.Abs(n);   // Invertir para crear crestas
-                n *= n;                 // Suavizar las crestas
+                n = 1f - Math.Abs(n);
+                n *= n;
                 total    += n * amplitude;
-                maxValue += amplitude;
+                maxVal   += amplitude;
                 amplitude *= 0.5f;
                 frequency *= 2f;
             }
-
-            return total / maxValue;
+            return total / maxVal;
         }
 
         // ============================================================
-        //  UTILIDADES DE RUIDO
+        //  UTILIDADES
         // ============================================================
 
         private static float Fade(float t) => t * t * t * (t * (t * 6 - 15) + 10);
-
         private static float Lerp(float a, float b, float t) => a + (b - a) * t;
+
+        private static float SmoothStep(float edge0, float edge1, float x)
+        {
+            float t = Math.Clamp((x - edge0) / (edge1 - edge0 + 0.0001f), 0f, 1f);
+            return t * t * (3f - 2f * t);
+        }
 
         private float Grad2(int hash, float x, float y)
         {
@@ -527,98 +720,6 @@ namespace game
             return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
         }
 
-        /// <summary>
-        /// Genera un chunk LOD simplificado: SOLO la superficie (un bloque de altura).
-        /// No genera bajo tierra en absoluto — es completamente aire debajo.
-        /// Mucho más ligero para chunks lejanos.
-        /// </summary>
-        public byte[,,] GenerateLowPolyChunk(int chunkX, int chunkY, int chunkZ, int chunkSize, int depthLayers = 1)
-        {
-            byte[,,] blocks = new byte[chunkSize, chunkSize, chunkSize];
-            // Todos los bloques comienzan como Air (default)
-
-            int worldX = chunkX * chunkSize;
-            int worldY = chunkY * chunkSize;
-            int worldZ = chunkZ * chunkSize;
-
-            // Pre-calcular la altura del terreno para cada columna
-            int[,] heights = new int[chunkSize, chunkSize];
-            BiomeType[,] biomes = new BiomeType[chunkSize, chunkSize];
-
-            for (int bx = 0; bx < chunkSize; bx++)
-            {
-                for (int bz = 0; bz < chunkSize; bz++)
-                {
-                    float wx = worldX + bx;
-                    float wz = worldZ + bz;
-
-                    biomes[bx, bz] = GetBiome(wx, wz);
-                    heights[bx, bz] = GetTerrainHeight(wx, wz, biomes[bx, bz]);
-                }
-            }
-
-            // SOLO generar la superficie (1 layer) —sin underground
-            for (int bx = 0; bx < chunkSize; bx++)
-            {
-                for (int bz = 0; bz < chunkSize; bz++)
-                {
-                    int terrainHeight = heights[bx, bz];
-                    BiomeType biome = biomes[bx, bz];
-
-                    for (int by = 0; by < chunkSize; by++)
-                    {
-                        int wy = worldY + by;
-
-                        // Solo generar bloque EN la superficie
-                        if (wy >= Math.Max(0, terrainHeight - 8) && wy <= terrainHeight)
-                        {
-                            blocks[bx, by, bz] = biome switch
-                            {
-                                BiomeType.Mountains => BlockType.Stone,
-                                BiomeType.SnowPeaks => BlockType.Stone,
-                                _ => BlockType.Grass,
-                            };
-                        }
-                    }
-                }
-            }
-            
-            // Generar árboles encima del terreno (solo si parte del chunk es cercana a la superficie)
-            PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize, heights, biomes);
-
-            return blocks;
-        }
-
-        /// <summary>
-        /// Genera solo el heightmap (ULTRA simplificado) para VeryLowPolyChunk.
-        /// Retorna un array 2D de alturas, sin datos de bloques 3D.
-        /// Ultra eficiente para chunks muy lejanos.
-        /// </summary>
-        public int[,] GenerateVeryLowPolyChunk(int chunkX, int chunkY, int chunkZ, int chunkSize)
-        {
-            int[,] heightMap = new int[chunkSize, chunkSize];
-
-            int worldX = chunkX * chunkSize;
-            int worldZ = chunkZ * chunkSize;
-
-            for (int bx = 0; bx < chunkSize; bx++)
-            {
-                for (int bz = 0; bz < chunkSize; bz++)
-                {
-                    float wx = worldX + bx;
-                    float wz = worldZ + bz;
-
-                    BiomeType biome = GetBiome(wx, wz);
-                    int height = GetTerrainHeight(wx, wz, biome);
-
-                    heightMap[bx, bz] = height;
-                }
-            }
-
-            return heightMap;
-        }
-
-        /// <summary>Hash 2D a float [0,1] para posiciones de árboles.</summary>
         private static float Hash2Df(int x, int z, int seed)
         {
             int h = unchecked(seed ^ (x * 374761393) ^ (z * 668265263));

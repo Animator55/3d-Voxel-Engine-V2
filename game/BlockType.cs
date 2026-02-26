@@ -14,6 +14,8 @@ namespace game
         public const byte Sand = 4;     // Arena
         public const byte Water = 5;    // Agua
         public const byte Wood = 6;     // Madera
+        public const byte Snow = 7;     // Madera
+        public const byte Leaves = 8;     // Madera
 
         /// <summary>
         /// Verifica si un tipo de bloque es sólido (debe renderizarse y ocluye caras).
@@ -42,6 +44,8 @@ namespace game
                 Stone => new Microsoft.Xna.Framework.Color(128, 128, 128),  // Gris
                 Dirt => new Microsoft.Xna.Framework.Color(139, 90, 43),     // Marrón
                 Grass => new Microsoft.Xna.Framework.Color(34, 139, 34),    // Verde
+                Leaves => new Microsoft.Xna.Framework.Color(24, 109, 44),    // Verde
+                Snow => new Microsoft.Xna.Framework.Color(255, 255, 255),    // Blanco
                 Sand => new Microsoft.Xna.Framework.Color(238, 214, 175),   // Beige
                 Water => new Microsoft.Xna.Framework.Color(65, 105, 225),   // Azul
                 Wood => new Microsoft.Xna.Framework.Color(101, 67, 33),     // Marrón oscuro
