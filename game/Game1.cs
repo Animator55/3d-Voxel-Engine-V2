@@ -31,7 +31,7 @@ namespace game
 
         // Configuración
         private const int ChunkSize = 16;
-        private const int LoadDistance = 8;  // 8 chunks en cada dirección = 256 chunks
+        private const int LoadDistance = 16;  // 8 chunks en cada dirección = 256 chunks
 
         // UI Debug
         private SpriteBatch _spriteBatch;
@@ -124,7 +124,7 @@ namespace game
             _camera.Update(gameTime);
 
             // Actualizar chunks (loading/unloading y encolar generación)
-            _chunkManager.Update(_camera.Position);
+            _chunkManager.Update(_camera.Position, null);
 
             base.Update(gameTime);
         }
@@ -145,19 +145,44 @@ namespace game
 
             // ============ RENDERIZAR CHUNKS ============
             var frustum = _camera.GetFrustum();
-            _chunkManager.Draw(_effect, frustum);
+            
+            // Si estamos en modo wireframe, solo mostrar el chunk actual
+            if (_wireframeMode)
+            {
+                var currentChunkPos = _chunkManager.GetChunkCoordinates(_camera.Position);
+                _chunkManager.Draw(_effect, frustum, currentChunkPos, wireframeOnly: true);
+            }
+            else
+            {
+                _chunkManager.Draw(_effect, frustum);
+            }
 
             // ============ RENDERIZAR DEBUG UI ============
             if (_debugFont != null)
             {
                 _spriteBatch.Begin();
 
-                string debugText = $@"
-Camera Pos: {_camera.Position.X:F1}, {_camera.Position.Y:F1}, {_camera.Position.Z:F1}
-Chunks Loaded: {_chunkManager.LoadedChunkCount}
-Generation Queue: {_chunkManager.GenerationQueueCount}
-FPS: {(1f / gameTime.ElapsedGameTime.TotalSeconds):F0}
-";
+                string debugText = $"Camera Pos: {_camera.Position.X:F1}, {_camera.Position.Y:F1}, {_camera.Position.Z:F1}\n" +
+                                   $"Chunks Loaded: {_chunkManager.LoadedChunkCount}\n" +
+                                   $"Generation Queue: {_chunkManager.GenerationQueueCount}\n" +
+                                   $"FPS: {(1f / gameTime.ElapsedGameTime.TotalSeconds):F0}";
+
+                // Agregar información del chunk actual si estamos en wireframe mode
+                if (_wireframeMode)
+                {
+                    var currentChunkPos = _chunkManager.GetChunkCoordinates(_camera.Position);
+                    var currentChunk = _chunkManager.GetChunk(currentChunkPos);
+                    
+                    if (currentChunk != null && currentChunk.DebugInfo != null)
+                    {
+                        debugText += $"\n\nCHUNK ACTUAL:\n" +
+                                    $"Position: ({currentChunk.X}, {currentChunk.Y}, {currentChunk.Z})\n" +
+                                    $"Gen Time: {currentChunk.DebugInfo.MeshGenerationTimeMs}ms\n" +
+                                    $"Mesh Time: {currentChunk.DebugInfo.GreedyMeshingTimeMs}ms\n" +
+                                    $"Vertices: {currentChunk.DebugInfo.VertexCount}\n" +
+                                    $"Triangles: {currentChunk.DebugInfo.TriangleCount}";
+                    }
+                }
 
                 _spriteBatch.DrawString(_debugFont, debugText, new Vector2(10, 10), Color.White);
 

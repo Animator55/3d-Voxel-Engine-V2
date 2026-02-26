@@ -33,6 +33,9 @@ namespace game
         private IndexBuffer _indexBuffer;
         
         private BoundingBox _boundingBox;   // Para frustum culling
+        
+        // ============ Debug Info ============
+        private ChunkDebugInfo _debugInfo;  // Información de profiling
 
         // ============ Lock para acceso según Thread ============
         private readonly object _meshLock = new object();
@@ -134,6 +137,11 @@ namespace game
         public bool HasMesh => _vertexBuffer != null && _indices != null;
 
         /// <summary>
+        /// Información de debug y profiling del chunk.
+        /// </summary>
+        public ChunkDebugInfo DebugInfo => _debugInfo;
+
+        /// <summary>
         /// Marca el chunk como "dirty" - necesita regeneración de malla.
         /// Usualmente llamado desde threads workers.
         /// </summary>
@@ -161,12 +169,18 @@ namespace game
         /// 
         /// El ChunkManager pasará aquí los datos después de que GreedyMesher los genere.
         /// </summary>
-        public void SetMeshData(VertexPositionNormalColor[] vertices, ushort[] indices, GraphicsDevice graphicsDevice)
+        public void SetMeshData(VertexPositionNormalColor[] vertices, ushort[] indices, GraphicsDevice graphicsDevice, ChunkDebugInfo debugInfo = null)
         {
             lock (_meshLock)
             {
                 _vertices = vertices;
                 _indices = indices;
+                _debugInfo = debugInfo ?? new ChunkDebugInfo();
+
+                // Actualizar información de debug
+                _debugInfo.VertexCount = vertices?.Length ?? 0;
+                _debugInfo.IndexCount = indices?.Length ?? 0;
+                _debugInfo.LastMeshGenerationTime = DateTime.Now;
 
                 // Limpiar búferes viejos
                 _vertexBuffer?.Dispose();

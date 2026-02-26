@@ -2,6 +2,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 
 namespace game
 {
@@ -21,13 +22,18 @@ namespace game
             _size = size;
         }
 
-        public (VertexPositionNormalColor[] vertices, ushort[] indices) GenerateMesh()
+        public (VertexPositionNormalColor[] vertices, ushort[] indices, ChunkDebugInfo debugInfo) GenerateMesh()
         {
+            var stopwatch = Stopwatch.StartNew();
+            var debugInfo = new ChunkDebugInfo();
+
             _vertices = new List<VertexPositionNormalColor>();
             _indices = new List<ushort>();
 
             var blocks = _chunk.GetBlocks();
 
+            var meshStopwatch = Stopwatch.StartNew();
+            
             ProcessFaceDirection(blocks, Axis.X, 1);
             ProcessFaceDirection(blocks, Axis.X, -1);
             ProcessFaceDirection(blocks, Axis.Y, 1);
@@ -35,10 +41,16 @@ namespace game
             ProcessFaceDirection(blocks, Axis.Z, 1);
             ProcessFaceDirection(blocks, Axis.Z, -1);
 
-            if (_vertices.Count == 0)
-                return (null, null);
+            meshStopwatch.Stop();
+            debugInfo.GreedyMeshingTimeMs = meshStopwatch.ElapsedMilliseconds;
 
-            return (_vertices.ToArray(), _indices.ToArray());
+            stopwatch.Stop();
+            debugInfo.MeshGenerationTimeMs = stopwatch.ElapsedMilliseconds;
+
+            if (_vertices.Count == 0)
+                return (null, null, debugInfo);
+
+            return (_vertices.ToArray(), _indices.ToArray(), debugInfo);
         }
 
         private void ProcessFaceDirection(byte[,,] blocks, Axis axis, int direction)
@@ -237,16 +249,16 @@ namespace game
                     if (direction > 0)
                     {
                         corners[0] = new Vector3(a, b, faceOffset);
-                        corners[1] = new Vector3(a, b + height, faceOffset);
+                        corners[1] = new Vector3(a + width, b, faceOffset);
                         corners[2] = new Vector3(a + width, b + height, faceOffset);
-                        corners[3] = new Vector3(a + width, b, faceOffset);
+                        corners[3] = new Vector3(a, b + height, faceOffset);
                     }
                     else
                     {
-                        corners[0] = new Vector3(a + width, b, faceOffset);
-                        corners[1] = new Vector3(a + width, b + height, faceOffset);
-                        corners[2] = new Vector3(a, b + height, faceOffset);
-                        corners[3] = new Vector3(a, b, faceOffset);
+                        corners[0] = new Vector3(a, b, faceOffset);
+                        corners[1] = new Vector3(a, b + height, faceOffset);
+                        corners[2] = new Vector3(a + width, b + height, faceOffset);
+                        corners[3] = new Vector3(a + width, b, faceOffset);
                     }
                     break;
 
@@ -260,33 +272,12 @@ namespace game
                 _vertices.Add(new VertexPositionNormalColor(corners[i], normal, color));
 
             // FIX 3: índices consistentes 0,1,2 / 0,2,3 (CCW)
-            if(axis != Axis.Z) {
-                _indices.Add((ushort)(baseVertex + 0));
-                _indices.Add((ushort)(baseVertex + 1));
-                _indices.Add((ushort)(baseVertex + 2));
-                _indices.Add((ushort)(baseVertex + 0));
-                _indices.Add((ushort)(baseVertex + 2));
-                _indices.Add((ushort)(baseVertex + 3));
-            }  
-
-            if (axis == Axis.Z && direction < 0)
-            {
-                _indices.Add((ushort)(baseVertex + 0));
-                _indices.Add((ushort)(baseVertex + 1));
-                _indices.Add((ushort)(baseVertex + 2));
-                _indices.Add((ushort)(baseVertex + 0));
-                _indices.Add((ushort)(baseVertex + 2));
-                _indices.Add((ushort)(baseVertex + 3));
-            }
-            else
-            {
-                _indices.Add((ushort)(baseVertex + 0));
-                _indices.Add((ushort)(baseVertex + 2));
-                _indices.Add((ushort)(baseVertex + 1));
-                _indices.Add((ushort)(baseVertex + 0));
-                _indices.Add((ushort)(baseVertex + 3));
-                _indices.Add((ushort)(baseVertex + 2));
-            }
+            _indices.Add((ushort)(baseVertex + 0));
+            _indices.Add((ushort)(baseVertex + 1));
+            _indices.Add((ushort)(baseVertex + 2));
+            _indices.Add((ushort)(baseVertex + 0));
+            _indices.Add((ushort)(baseVertex + 2));
+            _indices.Add((ushort)(baseVertex + 3));
         }
 
         private enum Axis { X, Y, Z }

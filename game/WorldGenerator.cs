@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace game
 {
@@ -11,18 +12,23 @@ namespace game
     /// - Cuevas procedurales (ruido 3D)
     /// - Árboles generados proceduralmente
     /// - Capas geológicas realistas (piedra, tierra, pasto, nieve)
+    /// - CACHE de bloques globales para evitar regeneración
     /// </summary>
     public class WorldGenerator
     {
         private readonly int _seed;
 
         // Configuración de altura
-        private const int SeaLevel    = 32;
+        private const int SeaLevel    = 10;
         private const int MaxHeight   = 120;
-        private const int MinHeight   = 8;
+        private const int MinHeight   = 16;
 
         // Permutation table para Perlin noise (clásico de Ken Perlin)
         private readonly int[] _perm = new int[512];
+
+        // CACHE de bloques generados (thread-safe)
+        private readonly Dictionary<(int chunkX, int chunkY, int chunkZ), byte[,,]> _blockCache = new();
+        private readonly object _cacheLock = new object();
 
         public WorldGenerator(int seed = 12345, float scale = 30f, int oceanLevel = 35)
         {
@@ -56,6 +62,35 @@ namespace game
         // ============================================================
         //  GENERACIÓN DE CHUNK
         // ============================================================
+
+        /// <summary>
+        /// Obtiene bloques del cache, o genera y cachea si no existen.
+        /// THREAD-SAFE: genera en paralelo sin duplicar trabajo.
+        /// </summary>
+        public byte[,,] GetOrGenerateChunk(int chunkX, int chunkY, int chunkZ, int chunkSize)
+        {
+            var key = (chunkX, chunkY, chunkZ);
+
+            lock (_cacheLock)
+            {
+                if (_blockCache.TryGetValue(key, out var cached))
+                    return cached;
+            }
+
+            // Generar (fuera del lock para evitar bloqueo)
+            byte[,,] blocks = GenerateChunk(chunkX, chunkY, chunkZ, chunkSize);
+
+            lock (_cacheLock)
+            {
+                // Doble-check: otro thread pudo haber generado mientras esperaba el lock
+                if (_blockCache.TryGetValue(key, out var cached2))
+                    return cached2;
+
+                _blockCache[key] = blocks;
+            }
+
+            return blocks;
+        }
 
         public byte[,,] GenerateChunk(int chunkX, int chunkY, int chunkZ, int chunkSize)
         {
@@ -490,6 +525,97 @@ namespace game
             float u = h < 8 ? x : y;
             float v = h < 4 ? y : (h == 12 || h == 14 ? x : z);
             return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
+        }
+
+        /// <summary>
+        /// Genera un chunk LOD simplificado: SOLO la superficie (un bloque de altura).
+        /// No genera bajo tierra en absoluto — es completamente aire debajo.
+        /// Mucho más ligero para chunks lejanos.
+        /// </summary>
+        public byte[,,] GenerateLowPolyChunk(int chunkX, int chunkY, int chunkZ, int chunkSize, int depthLayers = 1)
+        {
+            byte[,,] blocks = new byte[chunkSize, chunkSize, chunkSize];
+            // Todos los bloques comienzan como Air (default)
+
+            int worldX = chunkX * chunkSize;
+            int worldY = chunkY * chunkSize;
+            int worldZ = chunkZ * chunkSize;
+
+            // Pre-calcular la altura del terreno para cada columna
+            int[,] heights = new int[chunkSize, chunkSize];
+            BiomeType[,] biomes = new BiomeType[chunkSize, chunkSize];
+
+            for (int bx = 0; bx < chunkSize; bx++)
+            {
+                for (int bz = 0; bz < chunkSize; bz++)
+                {
+                    float wx = worldX + bx;
+                    float wz = worldZ + bz;
+
+                    biomes[bx, bz] = GetBiome(wx, wz);
+                    heights[bx, bz] = GetTerrainHeight(wx, wz, biomes[bx, bz]);
+                }
+            }
+
+            // SOLO generar la superficie (1 layer) —sin underground
+            for (int bx = 0; bx < chunkSize; bx++)
+            {
+                for (int bz = 0; bz < chunkSize; bz++)
+                {
+                    int terrainHeight = heights[bx, bz];
+                    BiomeType biome = biomes[bx, bz];
+
+                    for (int by = 0; by < chunkSize; by++)
+                    {
+                        int wy = worldY + by;
+
+                        // Solo generar bloque EN la superficie
+                        if (wy >= Math.Max(0, terrainHeight - 8) && wy <= terrainHeight)
+                        {
+                            blocks[bx, by, bz] = biome switch
+                            {
+                                BiomeType.Mountains => BlockType.Stone,
+                                BiomeType.SnowPeaks => BlockType.Stone,
+                                _ => BlockType.Grass,
+                            };
+                        }
+                    }
+                }
+            }
+            
+            // Generar árboles encima del terreno (solo si parte del chunk es cercana a la superficie)
+            PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize, heights, biomes);
+
+            return blocks;
+        }
+
+        /// <summary>
+        /// Genera solo el heightmap (ULTRA simplificado) para VeryLowPolyChunk.
+        /// Retorna un array 2D de alturas, sin datos de bloques 3D.
+        /// Ultra eficiente para chunks muy lejanos.
+        /// </summary>
+        public int[,] GenerateVeryLowPolyChunk(int chunkX, int chunkY, int chunkZ, int chunkSize)
+        {
+            int[,] heightMap = new int[chunkSize, chunkSize];
+
+            int worldX = chunkX * chunkSize;
+            int worldZ = chunkZ * chunkSize;
+
+            for (int bx = 0; bx < chunkSize; bx++)
+            {
+                for (int bz = 0; bz < chunkSize; bz++)
+                {
+                    float wx = worldX + bx;
+                    float wz = worldZ + bz;
+
+                    BiomeType biome = GetBiome(wx, wz);
+                    int height = GetTerrainHeight(wx, wz, biome);
+
+                    heightMap[bx, bz] = height;
+                }
+            }
+
+            return heightMap;
         }
 
         /// <summary>Hash 2D a float [0,1] para posiciones de árboles.</summary>
