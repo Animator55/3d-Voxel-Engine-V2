@@ -13,6 +13,12 @@ namespace game
     /// - Mezcla de alturas con smooth weights entre biomas (evita cortes)
     /// - Bioma SnowPeaks con nieve en superficie
     /// - CACHE de bloques global para evitar regeneración
+    /// 
+    /// SIMPLIFICATION LEVELS (para LOD):
+    ///   0 → calidad completa (HQ)
+    ///   1 → árboles cada 2 celdas de grid
+    ///   2 → árboles cada 4 celdas + saltea 1 de cada 2 bloques en el mesher
+    ///   3 → sin árboles + saltea 1 de cada 4 bloques + chunks enteros según stride
     /// </summary>
     public class WorldGenerator
     {
@@ -126,7 +132,8 @@ namespace game
                 }
             }
 
-            PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize, heights, biomes, riverMask);
+            // HQ siempre con árboles completos (simplificationLevel = 0)
+            PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize, heights, biomes, riverMask, simplificationLevel: 0);
 
             return blocks;
         }
@@ -163,17 +170,13 @@ namespace game
         {
             isRiver = false;
 
-            // Calcular altura base para cada tipo y mezclar suavemente
-            // Esto evita los cortes bruscos en los bordes de bioma
             float h = GetBlendedHeight(wx, wz, biome);
 
-            // Aplicar ríos (solo en biomas planos y con colinas, no en montañas)
             if (biome == BiomeType.Plains || biome == BiomeType.Hills || biome == BiomeType.Forest)
             {
                 float riverInfluence = GetRiverInfluence(wx, wz, out float riverDepth01);
                 if (riverInfluence > 0f)
                 {
-                    // Excavar por debajo del SeaLevel para que el agua llene el canal
                     float riverBottom = SeaLevel - 3f;
                     h = h * (1f - riverInfluence) + riverBottom * riverInfluence;
 
@@ -185,18 +188,11 @@ namespace game
             return (int)Math.Clamp(h, MinHeight, MaxHeight);
         }
 
-        /// <summary>
-        /// Mezcla las alturas de biomas adyacentes usando smooth weights,
-        /// evitando cortes bruscos en los bordes. Inspirado en ProceduralGenerator.
-        /// </summary>
         private float GetBlendedHeight(float wx, float wz, BiomeType biome)
         {
-            // Muestras de ruido para pesos (mismos que GetBiome pero sin warp para coherencia)
             float roughness01 = (OctaveNoise2D(wx, wz, scale: 300f, octaves: 2, persistence: 0.5f, seed: _seed + 1) + 1f) * 0.5f;
             float temp01      = (OctaveNoise2D(wx, wz, scale: 400f, octaves: 2, persistence: 0.5f, seed: _seed) + 1f) * 0.5f;
 
-            // Alturas por tipo — usan BaseHeight como piso, NO SeaLevel
-            // Así el terreno siempre queda por encima del agua
             float plainsH = BaseHeight + 2f  + OctaveNoise2D(wx, wz, scale: 120f, octaves: 3, persistence: 0.4f,  seed: _seed + 10) * 8f;
             float hillsH  = BaseHeight + 6f  + OctaveNoise2D(wx, wz, scale: 80f,  octaves: 4, persistence: 0.5f,  seed: _seed + 20) * 20f;
             float forestH = BaseHeight + 4f  + OctaveNoise2D(wx, wz, scale: 100f, octaves: 4, persistence: 0.45f, seed: _seed + 30) * 12f;
@@ -209,7 +205,6 @@ namespace game
             float ridgeS  = RidgeNoise2D(wx, wz, scale: 40f, octaves: 5, seed: _seed + 51);
             float snowH   = BaseHeight + 36f + baseS * 40f + ridgeS * 30f;
 
-            // Pesos suaves (smooth step) por zona de rugosidad/temperatura
             float wPlains   = SmoothStep(0.35f, 0.0f,  roughness01) * (temp01 < 0.55f ? 1f : 0f);
             float wForest   = SmoothStep(0.35f, 0.0f,  roughness01) * (temp01 >= 0.55f ? 1f : 0f);
             float wHills    = SmoothStep(0.35f, 0.52f, roughness01) * SmoothStep(0.72f, 0.52f, roughness01);
@@ -227,31 +222,22 @@ namespace game
         //  RÍOS
         // ============================================================
 
-        /// <summary>
-        /// Genera una influencia de río [0,1] basada en ridge inverso de fbm.
-        /// Donde el ruido está cerca de 0.5 → canal de río.
-        /// Inspirado directamente en RiverNoise del ProceduralGenerator.
-        /// </summary>
         private float GetRiverInfluence(float wx, float wz, out float depth01)
         {
-            // Warp de río para curvas naturales
             float rwarpX = OctaveNoise2D(wx, wz, scale: 150f, octaves: 2, persistence: 0.5f, seed: _seed + 600) * 30f;
             float rwarpZ = OctaveNoise2D(wx, wz, scale: 150f, octaves: 2, persistence: 0.5f, seed: _seed + 601) * 30f;
 
             float n = OctaveNoise2D(wx + rwarpX, wz + rwarpZ, scale: 300f, octaves: 4, persistence: 0.5f, seed: _seed + 700);
-            n = (n + 1f) * 0.5f; // [0,1]
+            n = (n + 1f) * 0.5f;
 
-            // El valor absoluto de (n - 0.5) → cercano a 0 = río
-            float riverRaw = 1f - Math.Abs(n * 2f - 1f); // [0,1], pico en n=0.5
-            riverRaw = (float)Math.Pow(riverRaw, 3f);      // Afilar canal
+            float riverRaw = 1f - Math.Abs(n * 2f - 1f);
+            riverRaw = (float)Math.Pow(riverRaw, 3f);
 
             depth01 = riverRaw;
 
-            // Threshold: solo cavar si riverRaw > 0.7
             float threshold = 0.70f;
             if (riverRaw < threshold) return 0f;
 
-            // Normalizar la influencia en el canal
             return Math.Clamp((riverRaw - threshold) / (1f - threshold), 0f, 1f);
         }
 
@@ -263,13 +249,11 @@ namespace game
         {
             if (wy > terrainHeight)
             {
-                // Rellenar con agua todo lo que quede entre el terreno y el SeaLevel
                 if (wy <= SeaLevel)
                     return BlockType.Water;
                 return BlockType.Air;
             }
 
-            // Cuevas 3D
             if (wy > 2 && wy < terrainHeight - 2)
             {
                 float cave = OctaveNoise3D(wx, wy, wz, scale: 20f, octaves: 2, persistence: 0.5f, seed: _seed + 99);
@@ -277,7 +261,6 @@ namespace game
                     return BlockType.Air;
             }
 
-            // Superficie
             if (wy == terrainHeight)
             {
                 if (isRiver) return BlockType.Sand;
@@ -290,7 +273,6 @@ namespace game
                 };
             }
 
-            // Subsuperficie
             int dirtDepth = (biome == BiomeType.Mountains || biome == BiomeType.SnowPeaks) ? 1 : 3;
             if (wy >= terrainHeight - dirtDepth)
             {
@@ -307,13 +289,8 @@ namespace game
 
         // ============================================================
         //  ÁRBOLES (5 variantes con ramas y clusters de hojas)
-        //  Inspirado en TreeGenerator del ProceduralGenerator.
         // ============================================================
 
-        // Cada variante: (tronco[], ramas[], puntasDeRama[])
-        // Las coordenadas son offset desde la base del árbol (0,0,0)
-
-        // --- Variante 0: Árbol redondeado estándar ---
         private static readonly (int, int, int)[] _trunk0 =
         {
             (0,0,0),(0,1,0),(0,2,0),(0,3,0),(0,4,0),(0,5,0),
@@ -325,7 +302,6 @@ namespace game
             (0,6,0),(1,6,0),(-1,6,0),(0,6,1),(0,6,-1),
         };
 
-        // --- Variante 1: Copa ancha baja ---
         private static readonly (int, int, int)[] _trunk1 =
         {
             (0,0,0),(0,1,0),(0,2,0),(0,3,0),(0,4,0),(0,5,0),(0,6,0),
@@ -343,7 +319,6 @@ namespace game
             (1,6,0),(-1,6,0),(0,6,1),(0,6,-1),(0,6,0),
         };
 
-        // --- Variante 2: Árbol torcido ---
         private static readonly (int, int, int)[] _trunk2 =
         {
             (0,0,0),(0,1,0),(0,2,0),
@@ -361,7 +336,6 @@ namespace game
             (2,8,2),(1,8,1),(3,8,0),(2,9,1),
         };
 
-        // --- Variante 3: Copa densa alta ---
         private static readonly (int, int, int)[] _trunk3 =
         {
             (0,0,0),(0,1,0),(0,2,0),(0,3,0),(0,4,0),(0,5,0),
@@ -381,7 +355,6 @@ namespace game
             (1,10,0),(-1,10,0),(0,10,1),(0,10,-1),(0,10,0),
         };
 
-        // --- Variante 4: Árbol bajo extendido ---
         private static readonly (int, int, int)[] _trunk4 =
         {
             (0,0,0),(0,1,0),(0,2,0),(1,3,1),(1,4,1),
@@ -399,7 +372,6 @@ namespace game
             (2,5,1),(-1,5,1),(1,5,2),(0,5,0),
         };
 
-        // Cluster de hojas alrededor de cada punta de rama
         private static readonly (int, int, int)[] _leafCluster =
         {
             (0,0,0),
@@ -426,15 +398,31 @@ namespace game
             new TreeVariant { Trunk = _trunk4, Branches = _branches4, Tips = _tips4 },
         };
 
+        /// <summary>
+        /// Coloca árboles en el chunk según el nivel de simplificación:
+        ///   0 → grid de 5, todos los árboles (HQ)
+        ///   1 → grid de 10 (skipea 1 de cada 2 celdas)
+        ///   2 → grid de 20 (skipea 3 de cada 4 celdas)
+        ///   3+ → sin árboles
+        /// La máscara de river/bioma es la misma; no se generan máscaras extra.
+        /// </summary>
         private void PlaceTrees(
             byte[,,] blocks,
             int worldX, int worldY, int worldZ,
             int chunkSize,
             int[,] heights,
             BiomeType[,] biomes,
-            bool[,] riverMask)
+            bool[,] riverMask,
+            int simplificationLevel = 0)
         {
-            const int gridSize = 5;
+            // Con 3 niveles (0,1,2) todos generan árboles.
+            // gridSize controla el espaciado de la grilla de árboles.
+            int gridSize = simplificationLevel switch
+            {
+                0 => 5,
+                1 => 10,
+                _ => 20,  // nivel 2
+            };
 
             for (int gx = 0; gx < chunkSize / gridSize + 1; gx++)
             {
@@ -452,8 +440,6 @@ namespace game
                     int localZ = gz * gridSize + offZ;
 
                     if (localX >= chunkSize || localZ >= chunkSize) continue;
-
-                    // No plantar en ríos
                     if (riverMask[localX, localZ]) continue;
 
                     BiomeType biome = biomes[localX, localZ];
@@ -468,10 +454,9 @@ namespace game
 
                     if (chance > treeProbability) continue;
 
-                    int treeBase = heights[localX, localZ] + 1;
+                    int treeBase   = heights[localX, localZ] + 1;
                     int localBaseY = treeBase - worldY;
 
-                    // Seleccionar variante por posición (determinístico)
                     int variantIdx = (int)(Hash2Df(cellWX + 5, cellWZ + 5, _seed + 210) * _treeVariants.Length);
                     variantIdx = Math.Clamp(variantIdx, 0, _treeVariants.Length - 1);
 
@@ -484,7 +469,6 @@ namespace game
         {
             ref readonly var variant = ref _treeVariants[variantIdx];
 
-            // Tronco
             foreach (var (dx, dy, dz) in variant.Trunk)
             {
                 int bx = lx + dx, by = ly + dy, bz = lz + dz;
@@ -492,7 +476,6 @@ namespace game
                     blocks[bx, by, bz] = BlockType.Wood;
             }
 
-            // Ramas (también madera)
             foreach (var (dx, dy, dz) in variant.Branches)
             {
                 int bx = lx + dx, by = ly + dy, bz = lz + dz;
@@ -500,7 +483,6 @@ namespace game
                     blocks[bx, by, bz] = BlockType.Wood;
             }
 
-            // Hojas: cluster alrededor de cada punta de rama
             foreach (var (tx, ty, tz) in variant.Tips)
             {
                 foreach (var (cx, cy, cz) in _leafCluster)
@@ -523,7 +505,20 @@ namespace game
         //  LOD SIMPLIFICADO
         // ============================================================
 
-        public byte[,,] GenerateLowPolyChunk(int chunkX, int chunkY, int chunkZ, int chunkSize, int depthLayers = 1)
+        /// <summary>
+        /// Genera un chunk LOD simplificado.
+        /// 
+        /// <paramref name="simplificationLevel"/> controla:
+        ///   0 → surface completa + todos los árboles (igual que nivel 1 original)
+        ///   1 → surface + árboles cada 2 celdas
+        ///   2 → surface + árboles cada 4 celdas
+        ///      (el bloque-stride del mesher lo aplica SimpleLowPolyMesher)
+        ///   3 → surface sin árboles
+        /// </summary>
+        public byte[,,] GenerateLowPolyChunk(
+            int chunkX, int chunkY, int chunkZ,
+            int chunkSize,
+            int simplificationLevel = 0)
         {
             byte[,,] blocks = new byte[chunkSize, chunkSize, chunkSize];
 
@@ -547,6 +542,15 @@ namespace game
                 }
             }
 
+            // Número de capas de suelo visibles debajo de la superficie.
+            // A mayor simplificación generamos menos capas (el mesher ya va a saltar bloques).
+            int simplifiedCheck = simplificationLevel switch
+            {
+                0 => 20,
+                1 => 10,
+                _ => 5,
+            };
+
             for (int bx = 0; bx < chunkSize; bx++)
             {
                 for (int bz = 0; bz < chunkSize; bz++)
@@ -558,7 +562,7 @@ namespace game
                     for (int by = 0; by < chunkSize; by++)
                     {
                         int wy = worldY + by;
-                        if (wy >= terrainHeight - 8 && wy <= terrainHeight)
+                        if (wy >= terrainHeight - simplifiedCheck && wy <= terrainHeight)
                         {
                             blocks[bx, by, bz] = wy == terrainHeight
                                 ? GetSurfaceBlock(biome, isRiver)
@@ -572,7 +576,11 @@ namespace game
                 }
             }
 
-            PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize, heights, biomes, riverMask);
+            // Árboles: siempre pasamos el mismo simplificationLevel
+            PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize,
+                       heights, biomes, riverMask,
+                       simplificationLevel: simplificationLevel);
+
             return blocks;
         }
 

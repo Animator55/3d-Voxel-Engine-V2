@@ -9,57 +9,57 @@ using System.Threading.Tasks;
 namespace game
 {
     /// <summary>
-    /// Administra todos los chunks del mundo - NUEVA ARQUITECTURA:
-    /// 
+    /// Administra todos los chunks del mundo.
+    ///
     /// SISTEMA DE CAPAS:
-    /// - LowPoly Chunks: PERSISTENTES, cacheados, son el "fondo" siempre visible
-    ///   └─ Se generan en todo el mapa visible, mesh CACHEADA
-    ///   └─ Se descartan solo cuando MUY lejanos
-    /// 
-    /// - HighQuality Chunks: TEMPORALES, reemplazan a lowPoly en renderizado
-    ///   └─ Se generan solo en zona cercana (_loadDistance)
-    ///   └─ Se descartan cuando salen de zona
-    ///   └─ Cuando tienen mesh, reemplazan al lowPoly en render
-    /// 
-    /// VENTAJAS:
-    /// - Queue pequeña (máx 500) — solo genera cercanos
-    /// - LowPoly persistente = seamless transitions
-    /// - No genera bajo tierra en lowPoly
-    /// - Conversión automática: highQuality > lowPoly en render
-    /// 
-    /// MULTITHREADING:
-    /// - Generación de bloques: ThreadPool + cache global
-    /// - Greedy meshing: ThreadPool (workers)
-    /// - Creación GPU: Main thread
+    ///   HQ  → detalle completo, zona cercana
+    ///   LP  → LowPolyChunk con 4 meshes pre-cacheadas (una por nivel LOD)
+    ///         Al alejarse/acercarse solo se cambia ActiveLevel: cero regeneración.
+    ///
+    /// GENERACIÓN LP:
+    ///   Al crear un LP chunk se encolan los 4 niveles de una vez.
+    ///   Cada nivel se procesa en su propia task y sube su mesh a GPU
+    ///   independientemente. El nivel activo se actualiza cada frame.
+    ///
+    /// CHUNK-STRIDE (nivel 3):
+    ///   En la corona más lejana se saltean chunks alternos en XZ
+    ///   (posiciones impares), reduciendo a ~1/4 los chunks generados.
     /// </summary>
     public class ChunkManager
     {
-        // CAPAS DE CHUNKS (3 niveles de LOD)
-        private readonly Dictionary<Vector3Int, Chunk> _chunks;  // HighQuality (cercano)
-        private readonly Dictionary<Vector3Int, LowPolyChunk> _lowPolyChunks;  // LowPoly (medio)
-        // private readonly Dictionary<Vector3Int, VeryLowPolyChunk> _veryLowPolyChunks;  // VeryLowPoly (lejano)
-        
-        // GENERACIÓN CON LÍMITE
-        private readonly Queue<Vector3Int> _generationQueue;  // MAX 5000
-        private const int MAX_QUEUE_SIZE = 5000;  // LÍMITE DURO para evitar spam
-        
-        // DATOS DE MALLA
-        private readonly Queue<MeshData> _meshDataQueue;
+        // ── Diccionarios de chunks ───────────────────────────────────
+        private readonly Dictionary<Vector3Int, Chunk>        _chunks;
+        private readonly Dictionary<Vector3Int, LowPolyChunk> _lowPolyChunks;
+
+        // ── Cola de generación ───────────────────────────────────────
+        //   Cada entrada lleva el tipo + el nivel LOD (solo relevante para LP)
+        private readonly Queue<(Vector3Int pos, ChunkType type, int level)> _generationQueue;
+        private const int MAX_QUEUE_SIZE = 50000;
+
+        // ── Colas de malla (main thread) ─────────────────────────────
+        private readonly Queue<MeshData>        _meshDataQueue;
         private readonly Queue<MeshDataLowPoly> _lowPolyMeshDataQueue;
-        // private readonly Queue<MeshDataVeryLowPoly> _veryLowPolyMeshDataQueue;
-        
+
         private readonly WorldGenerator _worldGenerator;
         private readonly GraphicsDevice _graphicsDevice;
 
         private Vector3Int _lastPlayerChunkPos;
-        private Vector3 _lastPlayerPosition;
+        private Vector3    _lastPlayerPosition;
         private readonly int _chunkSize;
-        private readonly int _loadDistance;      // Distancia para HighQuality
-        private readonly int _lodDistance;       // Distancia para LowPoly (= loadDistance * 2)
-        // private readonly int _veryLodDistance;   // Distancia para VeryLowPoly (= loadDistance * 4)
-        
-        private readonly object _chunkLock = new object();
-        private readonly object _queueLock = new object();
+        private readonly int _loadDistance;
+        private readonly int _lodDistance;
+
+        // Radio XZ del LOD: con loadDistance=4 → 10 chunks de radio horizontal.
+        private int LodDistXZ => Math.Min(_lodDistance, _loadDistance * 2 + 2);
+
+        // Radio Y del LOD: el terreno va hasta MaxHeight=120 ≈ chunkY 3.
+        // Con LodDistY=1 y el jugador en chunkY≈2 se cubren chunkY 1–3.
+        // LodDistY=3 cargaba chunkY 4–5 (Y 128–191) que son SIEMPRE aire puro:
+        // se marcaban _levelFailed pero seguían en el dict inflando TotalChunkEntries.
+        private const int LodDistY = 3;
+
+        private readonly object _chunkLock     = new object();
+        private readonly object _queueLock     = new object();
         private readonly object _meshQueueLock = new object();
 
         private int _activeGenerationTasks;
@@ -67,36 +67,49 @@ namespace game
         public ChunkManager(GraphicsDevice graphicsDevice, int chunkSize = 16, int loadDistance = 4)
         {
             _graphicsDevice = graphicsDevice;
-            _chunkSize = chunkSize;
-            _loadDistance = loadDistance;
-            _lodDistance = loadDistance * 2;
-            // _veryLodDistance = loadDistance * 4;
+            _chunkSize      = chunkSize;
+            _loadDistance   = loadDistance;
+            _lodDistance    = loadDistance * 4;
 
-            _chunks = new Dictionary<Vector3Int, Chunk>(256);
+            _chunks        = new Dictionary<Vector3Int, Chunk>(256);
             _lowPolyChunks = new Dictionary<Vector3Int, LowPolyChunk>(1024);
-            // _veryLowPolyChunks = new Dictionary<Vector3Int, VeryLowPolyChunk>(2048);  // Más espacio para ultra lejano
-            _generationQueue = new Queue<Vector3Int>(MAX_QUEUE_SIZE);
-            _meshDataQueue = new Queue<MeshData>(256);
+
+            _generationQueue      = new Queue<(Vector3Int, ChunkType, int)>(MAX_QUEUE_SIZE);
+            _meshDataQueue        = new Queue<MeshData>(256);
             _lowPolyMeshDataQueue = new Queue<MeshDataLowPoly>(512);
-            // _veryLowPolyMeshDataQueue = new Queue<MeshDataVeryLowPoly>(512);
-            _worldGenerator = new WorldGenerator(seed: 42);
+
+            _worldGenerator     = new WorldGenerator(seed: 42);
             _lastPlayerChunkPos = Vector3Int.Zero;
             _lastPlayerPosition = Vector3.Zero;
-            _activeGenerationTasks = 0;
         }
 
+        // ============================================================
+        //  SIMPLIFICATION LEVEL
+        // ============================================================
+
         /// <summary>
-        /// Actualiza qué chunks deben estar cargados según la posición del jugador.
-        /// NUEVA LÓGICA:
-        /// - HighQuality (0 a loadDistance): temporal, se descarta al salir
-        /// - LowPoly (0 a lodDistance): persistente, cacheado, siempre visible
-        /// 
-        /// Se llama cada frame desde Update().
+        /// Nivel LOD según distancia XZ en chunks al jugador. Rango: 0–2.
+        ///   0 → dist <= 33%  (más detalle)
+        ///   1 → dist <= 66%
+        ///   2 → dist <= 100% (menos detalle)
         /// </summary>
+        private int GetSimplificationLevel(float distXZ)
+        {
+            float t = distXZ / (LodDistXZ + 0.5f);
+            if (t <= 0.33f) return 0;
+            if (t <= 0.66f) return 1;
+            return 2;
+        }
+
+
+
+        // ============================================================
+        //  UPDATE
+        // ============================================================
+
         public void Update(Vector3 playerPosition, BoundingFrustum cameraFrustum = null)
         {
             _lastPlayerPosition = playerPosition;
-
             Vector3Int currentChunkPos = GetChunkCoordinates(playerPosition);
 
             if (currentChunkPos != _lastPlayerChunkPos)
@@ -104,433 +117,311 @@ namespace game
                 _lastPlayerChunkPos = currentChunkPos;
                 UpdateVisibleChunks(currentChunkPos, playerPosition);
             }
+            else
+            {
+                // Aunque no se movio de chunk, actualizar niveles activos
+                UpdateActiveLevels(currentChunkPos);
+            }
 
             ProcessGenerationQueue();
             ProcessMeshDataQueue();
         }
 
-        /// <summary>
-        /// Calcula las coordenadas del chunk desde una posición mundial.
-        /// Soporta números negativos correctamente.
-        /// </summary>
         public Vector3Int GetChunkCoordinates(Vector3 worldPos)
         {
             int x = (int)Math.Floor(worldPos.X / _chunkSize);
             int y = (int)Math.Floor(worldPos.Y / _chunkSize);
             int z = (int)Math.Floor(worldPos.Z / _chunkSize);
-
             return new Vector3Int(x, y, z);
         }
 
-        /// <summary>
-        /// Actualiza qué chunks deben estar cargados (3 niveles de LOD).
-        /// ARQUITECTURA:
-        /// 1. HighQuality (cercano): Detalle completo
-        /// 2. LowPoly (medio): Superficie simplificada (cubos)
-        /// 3. VeryLowPoly (lejano): SOLO heightmap (grid)
-        /// Todos con distancia RADIAL (esférica) y mínimo Y=0
-        /// </summary>
+        // ============================================================
+        //  ACTUALIZAR CHUNKS VISIBLES
+        // ============================================================
+
         private void UpdateVisibleChunks(Vector3Int centerChunk, Vector3 playerPosition)
         {
-            var highQualityZone = new HashSet<Vector3Int>();
-            var lowPolyZone = new HashSet<Vector3Int>();
-            var veryLowPolyZone = new HashSet<Vector3Int>();
-            var chunksToGenerate = new List<Vector3Int>();
+            var highQualityZone  = new HashSet<Vector3Int>();
+            var lowPolyZone      = new HashSet<Vector3Int>();
+            var chunksToGenerate = new List<(Vector3Int pos, ChunkType type, int level)>();
 
-            // ZONA 1: HighQuality (cercano) - DISTANCIA RADIAL (esférica)
+            // ZONA HQ
             for (int x = -_loadDistance; x <= _loadDistance; x++)
+            for (int y = -_loadDistance; y <= _loadDistance; y++)
+            for (int z = -_loadDistance; z <= _loadDistance; z++)
             {
-                for (int y = -_loadDistance; y <= _loadDistance; y++)
-                {
-                    for (int z = -_loadDistance; z <= _loadDistance; z++)
-                    {
-                        int chunkY = centerChunk.Y + y;
-                        
-                        // No generar chunks debajo de Y=0
-                        if (chunkY < 0)
-                            continue;
+                int chunkY = centerChunk.Y + y;
+                if (chunkY < 0) continue;
 
-                        // Distancia euclidiana para carga RADIAL (esférica)
-                        float distChunk = (float)Math.Sqrt(x * x + y * y + z * z);
-
-                        // Generar en radio de _loadDistance chunks
-                        if (distChunk <= _loadDistance + 0.5f)  // +0.5f para incluir chunks en la esfera
-                        {
-                            highQualityZone.Add(new Vector3Int(
-                                centerChunk.X + x,
-                                chunkY,
-                                centerChunk.Z + z));
-                        }
-                    }
-                }
+                if ((float)Math.Sqrt(x*x + y*y + z*z) <= _loadDistance + 0.5f)
+                    highQualityZone.Add(new Vector3Int(centerChunk.X + x, chunkY, centerChunk.Z + z));
             }
 
-            // ZONA 2: LowPoly (zona medio) - DISTANCIA RADIAL (esférica)
-            for (int x = -_lodDistance; x <= _lodDistance; x++)
+            // ZONA LP — radio XZ independiente, Y muy acotado.
+            // Antes: esfera 3D de radio lodDistance=16 → 18k chunks.
+            // Ahora: cilindro XZ con tapa Y → ~1800 chunks.
+            int lodXZ = LodDistXZ;
+            for (int x = -lodXZ; x <= lodXZ; x++)
+            for (int y = -LodDistY; y <= LodDistY; y++)
+            for (int z = -lodXZ; z <= lodXZ; z++)
             {
-                for (int y = -_lodDistance; y <= _lodDistance; y++)
-                {
-                    for (int z = -_lodDistance; z <= _lodDistance; z++)
-                    {
-                        int chunkY = centerChunk.Y + y;
-                        
-                        // No generar chunks debajo de Y=0
-                        if (chunkY < 0)
-                            continue;
+                int chunkY = centerChunk.Y + y;
+                if (chunkY < 0) continue;
 
-                        var chunkPos = new Vector3Int(
-                            centerChunk.X + x,
-                            chunkY,
-                            centerChunk.Z + z);
+                var chunkPos = new Vector3Int(centerChunk.X + x, chunkY, centerChunk.Z + z);
+                float distXZ = (float)Math.Sqrt(x*x + z*z);
+                if (distXZ > lodXZ + 0.5f)               continue;
+                if (highQualityZone.Contains(chunkPos))  continue;
 
-                        // Distancia euclidiana para carga RADIAL (esférica)
-                        float distChunk = (float)Math.Sqrt(x * x + y * y + z * z);
-
-                        // Generar en radio de _lodDistance chunks, y NO en highQualityZone
-                        if (distChunk <= _lodDistance + 0.5f && !highQualityZone.Contains(chunkPos))
-                        {
-                            lowPolyZone.Add(chunkPos);
-                        }
-                    }
-                }
+                lowPolyZone.Add(chunkPos);
             }
-
-            // ZONA 3: VeryLowPoly (zona muy lejana) - DISTANCIA RADIAL (esférica)
-            // for (int x = -_veryLodDistance; x <= _veryLodDistance; x++)
-            // {
-            //     for (int y = -_veryLodDistance; y <= _veryLodDistance; y++)
-            //     {
-            //         for (int z = -_veryLodDistance; z <= _veryLodDistance; z++)
-            //         {
-            //             int chunkY = centerChunk.Y + y;
-                        
-            //             // No generar chunks debajo de Y=0
-            //             if (chunkY < 0)
-            //                 continue;
-
-            //             var chunkPos = new Vector3Int(
-            //                 centerChunk.X + x,
-            //                 chunkY,
-            //                 centerChunk.Z + z);
-
-            //             // Distancia euclidiana para carga RADIAL (esférica)
-            //             float distChunk = (float)Math.Sqrt(x * x + y * y + z * z);
-
-            //             // Generar en radio de _veryLodDistance chunks, y NO en otras zonas
-            //             if (distChunk <= _veryLodDistance + 0.5f && 
-            //                 !highQualityZone.Contains(chunkPos) && 
-            //                 !lowPolyZone.Contains(chunkPos))
-            //             {
-            //                 veryLowPolyZone.Add(chunkPos);
-            //             }
-            //         }
-            //     }
-            // }
 
             lock (_chunkLock)
             {
-                // 1. PROMOCIONAR LP → HQ (entraron en zona cercana)
-                // Si un chunk que era LP entra en HQ zone, convertirlo a HQ
-                var lpToPromote = new List<Vector3Int>();
+                // 1. Promover LP -> HQ
                 foreach (var chunkPos in _lowPolyChunks.Keys.ToList())
                 {
                     if (highQualityZone.Contains(chunkPos) && !_chunks.ContainsKey(chunkPos))
                     {
-                        lpToPromote.Add(chunkPos);
+                        _chunks[chunkPos] = new Chunk(chunkPos.X, chunkPos.Y, chunkPos.Z, _chunkSize);
+                        chunksToGenerate.Add((chunkPos, ChunkType.HighQuality, 0));
                     }
                 }
 
-                foreach (var chunkPos in lpToPromote)
-                {
-                    // MANTENER LP como respaldo mientras HQ se genera y procesa su mesh
-                    // Crear HQ en paralelo - LP seguirá siendo visible hasta que HQ tenga mesh
-                    _chunks[chunkPos] = new Chunk(chunkPos.X, chunkPos.Y, chunkPos.Z, _chunkSize);
-                    chunksToGenerate.Add(chunkPos);
-                    
-                    // LP se borrará automáticamente cuando HQ esté muy lejano (sección 5)
-                }
-
-                // 2. CREAR HQ NUEVOS si no existen en ningún lado
+                // 2. Crear HQ nuevos
                 foreach (var chunkPos in highQualityZone)
                 {
                     if (!_chunks.ContainsKey(chunkPos) && !_lowPolyChunks.ContainsKey(chunkPos))
                     {
                         _chunks[chunkPos] = new Chunk(chunkPos.X, chunkPos.Y, chunkPos.Z, _chunkSize);
-                        chunksToGenerate.Add(chunkPos);
+                        chunksToGenerate.Add((chunkPos, ChunkType.HighQuality, 0));
                     }
                 }
 
-                // 3. DESCARTAR HQ que salieron de la zona
-                // Si aún están en lowPolyZone, crear LP para reemplazar
-                var hqToRemove = new List<Vector3Int>();
-                foreach (var chunkPos in _chunks.Keys.ToList())
-                {
-                    if (!highQualityZone.Contains(chunkPos))
-                    {
-                        hqToRemove.Add(chunkPos);
-                    }
-                }
-
+                // 3. Descartar HQ fuera de zona
+                var hqToRemove = _chunks.Keys.Where(p => !highQualityZone.Contains(p)).ToList();
                 foreach (var chunkPos in hqToRemove)
                 {
                     _chunks[chunkPos].Dispose();
                     _chunks.Remove(chunkPos);
-                    
-                    // Si aún está en lowPolyZone, crear LP como respaldo
+
                     if (lowPolyZone.Contains(chunkPos) && !_lowPolyChunks.ContainsKey(chunkPos))
                     {
                         _lowPolyChunks[chunkPos] = new LowPolyChunk(chunkPos.X, chunkPos.Y, chunkPos.Z, _chunkSize);
-                        chunksToGenerate.Add(chunkPos);
+                        // Encolar de peor a mejor calidad: el nivel 3 (más rápido) llega primero
+                        // y cubre el chunk; los niveles mejores llegan después sin flashear.
+                        for (int lvl = LowPolyChunk.LOD_LEVELS - 1; lvl >= 0; lvl--)
+                            chunksToGenerate.Add((chunkPos, ChunkType.LowPoly, lvl));
                     }
                 }
 
-                // 4. CREAR LP NUEVOS en zona LOD si no existen
+                // 4. Crear LP nuevos o encolar niveles faltantes
                 foreach (var chunkPos in lowPolyZone)
                 {
-                    if (!_chunks.ContainsKey(chunkPos) && !_lowPolyChunks.ContainsKey(chunkPos))
+                    if (_chunks.ContainsKey(chunkPos)) continue;
+
+                    if (!_lowPolyChunks.ContainsKey(chunkPos))
                     {
                         _lowPolyChunks[chunkPos] = new LowPolyChunk(chunkPos.X, chunkPos.Y, chunkPos.Z, _chunkSize);
-                        chunksToGenerate.Add(chunkPos);
+                        // Mismo orden: peor calidad primero para que haya algo visible de inmediato
+                        for (int lvl = LowPolyChunk.LOD_LEVELS - 1; lvl >= 0; lvl--)
+                            chunksToGenerate.Add((chunkPos, ChunkType.LowPoly, lvl));
                     }
-                }
-
-                // 5. PROMOCIONAR LP → VeryLP (salieron de zona LP pero aún en VeryLP)
-                // NOTA: NO encolaremos para generar aún - baja prioridad, se generarán después
-                // var lpToPromoteVLP = new List<Vector3Int>();
-                // foreach (var chunkPos in _lowPolyChunks.Keys.ToList())
-                // {
-                //     if (veryLowPolyZone.Contains(chunkPos) && !_veryLowPolyChunks.ContainsKey(chunkPos))
-                //     {
-                //         lpToPromoteVLP.Add(chunkPos);
-                //     }
-                // }
-
-                // foreach (var chunkPos in lpToPromoteVLP)
-                // {
-                //     // Crear VeryLowPoly pero NO encolar aún (baja prioridad)
-                //     _veryLowPolyChunks[chunkPos] = new VeryLowPolyChunk(chunkPos.X, chunkPos.Y, chunkPos.Z, _chunkSize);
-                // }
-
-                // // 6. CREAR VeryLP NUEVOS en zona muy lejana si no existen
-                // // NOTA: Baja prioridad - no se encolan automáticamente
-                // foreach (var chunkPos in veryLowPolyZone)
-                // {
-                //     if (!_chunks.ContainsKey(chunkPos) && !_lowPolyChunks.ContainsKey(chunkPos) && !_veryLowPolyChunks.ContainsKey(chunkPos))
-                //     {
-                //         _veryLowPolyChunks[chunkPos] = new VeryLowPolyChunk(chunkPos.X, chunkPos.Y, chunkPos.Z, _chunkSize);
-                //     }
-                // }
-
-                // 7. BORRAR LP super lejano (PERMISIVO) - distancia euclidiana
-                float superFarDistSq = (_lodDistance + 10) * (_lodDistance + 10);  // Usar squared para evitar sqrt
-                var lpToRemove = new List<Vector3Int>();
-                foreach (var chunkPos in _lowPolyChunks.Keys.ToList())
-                {
-                    int dx = chunkPos.X - centerChunk.X;
-                    int dy = chunkPos.Y - centerChunk.Y;
-                    int dz = chunkPos.Z - centerChunk.Z;
-                    float distSq = dx * dx + dy * dy + dz * dz;
-
-                    if (distSq > superFarDistSq)
+                    else
                     {
-                        lpToRemove.Add(chunkPos);
+                        var lpChunk = _lowPolyChunks[chunkPos];
+                        for (int lvl = LowPolyChunk.LOD_LEVELS - 1; lvl >= 0; lvl--)
+                        {
+                            if (lpChunk.NeedsMesh(lvl))
+                                chunksToGenerate.Add((chunkPos, ChunkType.LowPoly, lvl));
+                        }
                     }
                 }
+
+                // 5. Borrar LP muy lejanos.
+                // lodXZFar = LodDistXZ + 2: margen mínimo para evitar thrashing
+                // si el jugador se mueve justo en el borde. Antes era +6, lo que
+                // dejaba una corona de ~600 chunks acumulados entre move y move.
+                int lodXZFar = LodDistXZ + 2;
+                var lpToRemove = _lowPolyChunks.Keys
+                    .Where(p =>
+                    {
+                        int dx = p.X - centerChunk.X;
+                        int dz = p.Z - centerChunk.Z;
+                        int dy = p.Y - centerChunk.Y;
+                        return dx*dx + dz*dz > lodXZFar * lodXZFar
+                            || Math.Abs(dy) > LodDistY + 1;
+                    })
+                    .ToList();
 
                 foreach (var chunkPos in lpToRemove)
                 {
                     _lowPolyChunks[chunkPos].Dispose();
                     _lowPolyChunks.Remove(chunkPos);
                 }
-
-                // 8. BORRAR VeryLP super lejano
-                // float superFarDistVLPSq = (_veryLodDistance + 15) * (_veryLodDistance + 15);
-                // var vlpToRemove = new List<Vector3Int>();
-                // foreach (var chunkPos in _veryLowPolyChunks.Keys.ToList())
-                // {
-                //     int dx = chunkPos.X - centerChunk.X;
-                //     int dy = chunkPos.Y - centerChunk.Y;
-                //     int dz = chunkPos.Z - centerChunk.Z;
-                //     float distSq = dx * dx + dy * dy + dz * dz;
-
-                //     if (distSq > superFarDistVLPSq)
-                //     {
-                //         vlpToRemove.Add(chunkPos);
-                //     }
-                // }
-
-                // foreach (var chunkPos in vlpToRemove)
-                // {
-                //     _veryLowPolyChunks[chunkPos].Dispose();
-                //     _veryLowPolyChunks.Remove(chunkPos);
-                // }
             }
 
-            // PRIORIZAR por distancia
+            // Actualizar niveles activos inmediatamente
+            UpdateActiveLevels(centerChunk);
+
+            // Orden de prioridad:
+            //   1. HQ primero (zona cercana)
+            //   2. LP por distancia XZ (más cercano antes)
+            //   3. Dentro del mismo chunk LP, nivel más alto = peor calidad = más rápido,
+            //      así el chunk tiene algo visible de inmediato y los niveles mejores
+            //      lo van refinando sin producir flasheos.
             chunksToGenerate.Sort((a, b) =>
             {
-                Vector3 posA = new Vector3(a.X * _chunkSize + _chunkSize / 2, a.Y * _chunkSize + _chunkSize / 2, a.Z * _chunkSize + _chunkSize / 2);
-                Vector3 posB = new Vector3(b.X * _chunkSize + _chunkSize / 2, b.Y * _chunkSize + _chunkSize / 2, b.Z * _chunkSize + _chunkSize / 2);
-                float distA = Vector3.Distance(playerPosition, posA);
-                float distB = Vector3.Distance(playerPosition, posB);
-                return distA.CompareTo(distB);
+                if (a.type != b.type)
+                    return a.type == ChunkType.HighQuality ? -1 : 1;
+
+                // Para LP: priorizar nivel alto (peor calidad) sobre nivel bajo
+                // dentro del mismo chunk, para que haya coverage visual rápida.
+                if (a.pos.Equals(b.pos))
+                    return b.level.CompareTo(a.level); // nivel 3 antes que 0
+
+                // Entre chunks distintos: más cercano primero
+                float dA = (float)Math.Sqrt(
+                    Math.Pow(a.pos.X - (int)Math.Floor(playerPosition.X / _chunkSize), 2) +
+                    Math.Pow(a.pos.Z - (int)Math.Floor(playerPosition.Z / _chunkSize), 2));
+                float dB = (float)Math.Sqrt(
+                    Math.Pow(b.pos.X - (int)Math.Floor(playerPosition.X / _chunkSize), 2) +
+                    Math.Pow(b.pos.Z - (int)Math.Floor(playerPosition.Z / _chunkSize), 2));
+                return dA.CompareTo(dB);
             });
 
-            // Encolar TODOS los chunks principales (HQ y LP) - alta prioridad
+            // FIX: Limpiar la cola antes de encolar nuevas entradas.
+            // Sin esto, cada cambio de chunk acumula miles de entradas obsoletas
+            // que nunca se descartan, causando la explosión de pending/queued.
             lock (_queueLock)
             {
-                foreach (var chunkPos in chunksToGenerate)
-                {
-                    _generationQueue.Enqueue(chunkPos);
-                }
-
-                // BAJA PRIORIDAD: Encolar VeryLP SOLO cuando la cola está casi vacía
-                // Esto asegura que VeryLP no afecte los FPS ni los chunks importantes
-                // if (_generationQueue.Count < 10)  // Solo encolar si hay muy poco trabajo pendiente
-                // {
-                //     var veryLpToGenerate = new List<Vector3Int>();
-                    
-                    // Buscar VeryLP chunks que aún no tienen mesh
-                    // lock (_chunkLock)
-                    // {
-                    //     foreach (var chunkPos in _veryLowPolyChunks.Keys.ToList())
-                    //     {
-                    //         if (!_veryLowPolyChunks[chunkPos].HasMesh)
-                    //         {
-                    //             veryLpToGenerate.Add(chunkPos);
-                    //         }
-                    //     }
-                    // }
-
-                    // Encolar los VeryLP más cercanos (máx 3 por frame)
-                    // veryLpToGenerate.Sort((a, b) =>
-                    // {
-                    //     Vector3 posA = new Vector3(a.X * _chunkSize + _chunkSize / 2, a.Y * _chunkSize + _chunkSize / 2, a.Z * _chunkSize + _chunkSize / 2);
-                    //     Vector3 posB = new Vector3(b.X * _chunkSize + _chunkSize / 2, b.Y * _chunkSize + _chunkSize / 2, b.Z * _chunkSize + _chunkSize / 2);
-                    //     float distA = Vector3.Distance(playerPosition, posA);
-                    //     float distB = Vector3.Distance(playerPosition, posB);
-                    //     return distA.CompareTo(distB);
-                    // });
-
-                    // int maxVeryLp = Math.Min(3, veryLpToGenerate.Count);  // Máximo 3 VeryLP por frame
-                    // for (int i = 0; i < maxVeryLp; i++)
-                    // {
-                    //     _generationQueue.Enqueue(veryLpToGenerate[i]);
-                    // }
-                // }
+                _generationQueue.Clear();
+                foreach (var entry in chunksToGenerate)
+                    _generationQueue.Enqueue(entry);
             }
         }
 
         /// <summary>
-        /// Verifica si un chunk está dentro del frustum de la cámara.
+        /// Recalcula el ActiveLevel de cada LP chunk segun la distancia actual.
+        /// Costo: O(LP chunks), solo aritmetica entera — muy barato por frame.
+        /// Si el nivel deseado no tiene mesh aun, usa el mejor disponible.
         /// </summary>
-        private bool IsChunkInFrustum(int chunkX, int chunkY, int chunkZ, BoundingFrustum frustum)
+        private void UpdateActiveLevels(Vector3Int centerChunk)
         {
-            // Si no hay frustum, renderizar todo (backward compatibility)
-            if (frustum == null)
-                return true;
+            lock (_chunkLock)
+            {
+                foreach (var (chunkPos, lpChunk) in _lowPolyChunks)
+                {
+                    int dx = chunkPos.X - centerChunk.X;
+                    int dz = chunkPos.Z - centerChunk.Z;
+                    float distXZ = (float)Math.Sqrt(dx*dx + dz*dz);
 
-            Vector3 chunkMin = new Vector3(chunkX * _chunkSize, chunkY * _chunkSize, chunkZ * _chunkSize);
-            Vector3 chunkMax = chunkMin + new Vector3(_chunkSize, _chunkSize, _chunkSize);
-            var boundingBox = new BoundingBox(chunkMin, chunkMax);
-
-            return frustum.Intersects(boundingBox);
+                    int desired     = GetSimplificationLevel(distXZ);
+                    int activeLevel = FindBestAvailableLevel(lpChunk, desired);
+                    lpChunk.ActiveLevel = activeLevel;
+                }
+            }
         }
 
         /// <summary>
+        /// Busca el nivel con mesh disponible mas cercano al deseado.
+        /// Prioriza niveles mas bajos (mas calidad) si estan disponibles.
+        /// </summary>
+        private static int FindBestAvailableLevel(LowPolyChunk chunk, int desired)
+        {
+            if (chunk.HasMeshForLevel(desired)) return desired;
 
-        /// Procesa algunos chunks de la cola de generación.
-        /// Se llama cada frame para evitar generar demasiado simultáneamente.
-        /// </summary>
-        /// <summary>
-        /// Procesa algunos chunks de la cola de generación.
-        /// Se llama cada frame para evitar generar demasiado simultáneamente.
-        /// </summary>
-        private enum ChunkType { HighQuality, LowPoly, VeryLowPoly }
+            for (int offset = 1; offset < LowPolyChunk.LOD_LEVELS; offset++)
+            {
+                int lower = desired - offset;
+                int upper = desired + offset;
+
+                if (lower >= 0 && chunk.HasMeshForLevel(lower)) return lower;
+                if (upper < LowPolyChunk.LOD_LEVELS && chunk.HasMeshForLevel(upper)) return upper;
+            }
+
+            return desired; // Ningun nivel listo: HasMesh = false, no se renderiza
+        }
+
+        // ============================================================
+        //  FRUSTUM
+        // ============================================================
+
+        private bool IsChunkInFrustum(int cx, int cy, int cz, BoundingFrustum frustum)
+        {
+            if (frustum == null) return true;
+            var min = new Vector3(cx * _chunkSize, cy * _chunkSize, cz * _chunkSize);
+            return frustum.Intersects(new BoundingBox(min, min + new Vector3(_chunkSize)));
+        }
+
+        // ============================================================
+        //  COLA DE GENERACION
+        // ============================================================
+
+        private enum ChunkType { HighQuality, LowPoly }
+
+        private readonly int _maxConcurrentTasks = Math.Max(1, Environment.ProcessorCount - 1);
 
         private void ProcessGenerationQueue()
         {
-            // Si hay muchas tasks activas, esperar a que terminen
-            if (_activeGenerationTasks >= Environment.ProcessorCount * 2)
-                return;
-
-            List<(Vector3Int pos, ChunkType type)> toProcess = new();
-
-            // Extraer chunks de la cola SIN hacer locks anidados
-            lock (_queueLock)
+            // Sacar de la cola de a uno, respetando el límite real en cada paso.
+            // El Volatile.Read garantiza que leemos el valor actualizado por los
+            // threads de generación y no un valor cacheado por el compilador/CPU.
+            while (Volatile.Read(ref _activeGenerationTasks) < _maxConcurrentTasks)
             {
-                while (_generationQueue.Count > 0 && _activeGenerationTasks < Environment.ProcessorCount * 2)
-                {
-                    var chunkPos = _generationQueue.Dequeue();
-                    toProcess.Add((chunkPos, ChunkType.HighQuality));  // Determinaremos tipo después
-                }
-            }
+                (Vector3Int pos, ChunkType type, int level) entry;
 
-            // AHORA determinar tipo fuera del lock de queue
-            foreach (var (chunkPos, _) in toProcess)
-            {
-                ChunkType chunkType = ChunkType.HighQuality;
-                lock (_chunkLock)
+                lock (_queueLock)
                 {
-                    // Prioridad: HQ > LP > VeryLP
-                    // Un chunk promovido estará en múltiples diccionarios, pero prioridad a HQ
-                    if (_chunks.ContainsKey(chunkPos))
-                    {
-                        chunkType = ChunkType.HighQuality;
-                    }
-                    else if (_lowPolyChunks.ContainsKey(chunkPos))
-                    {
-                        chunkType = ChunkType.LowPoly;
-                    }
-                    // else if (_veryLowPolyChunks.ContainsKey(chunkPos))
-                    // {
-                    //     chunkType = ChunkType.VeryLowPoly;
-                    // }
+                    if (_generationQueue.Count == 0) return;
+                    entry = _generationQueue.Dequeue();
                 }
 
-                StartChunkGenerationTask(chunkPos, chunkType);
+                // Intentar spawnear. Si el chunk ya no existe o ya tiene mesh,
+                // StartChunkGenerationTask retorna sin incrementar — seguimos
+                // sacando de la cola hasta llenar el slot o vaciarla.
+                StartChunkGenerationTask(entry.pos, entry.type, entry.level);
             }
         }
 
-        /// <summary>
-        /// Inicia una task en el ThreadPool para generar un chunk (bloques + malla).
-        /// El tipo de chunk determina qué tipo de generación usar.
-        /// </summary>
-        private void StartChunkGenerationTask(Vector3Int chunkPos, ChunkType chunkType)
+        private void StartChunkGenerationTask(Vector3Int chunkPos, ChunkType type, int level)
         {
-            // Verificación de seguridad: el chunk debe existir en algún diccionario
+            // Verificar validez bajo lock ANTES de incrementar el contador.
+            // Así el Increment solo ocurre cuando realmente vamos a spawnear.
             lock (_chunkLock)
             {
                 bool exists = _chunks.ContainsKey(chunkPos) || _lowPolyChunks.ContainsKey(chunkPos);
-                if (!exists)
+                if (!exists) return;
+
+                if (type == ChunkType.LowPoly &&
+                    _lowPolyChunks.TryGetValue(chunkPos, out var lpCheck))
                 {
-                    // Chunk fue descargado antes de empezar a generar, ignorar
-                    return;
+                    if (lpCheck.HasMeshForLevel(level) || lpCheck.IsMeshBuildingForLevel(level))
+                        return;
+
+                    // Marcar como "en construcción" dentro del mismo lock que valida,
+                    // evitando que otro thread o la próxima iteración del Update
+                    // encole la misma tarea antes de que la task arranque.
+                    lpCheck.MarkMeshBuildStart(level);
                 }
             }
 
+            // Incrementar solo cuando sabemos que vamos a lanzar la task.
             Interlocked.Increment(ref _activeGenerationTasks);
 
             Task.Run(() =>
             {
                 try
                 {
-                    switch (chunkType)
-                    {
-                        case ChunkType.HighQuality:
-                            GenerateNormalChunkTask(chunkPos);
-                            break;
-                        case ChunkType.LowPoly:
-                            GenerateLowPolyChunkTask(chunkPos);
-                            break;
-                        // case ChunkType.VeryLowPoly:
-                        //     GenerateVeryLowPolyChunkTask(chunkPos);
-                        //     break;
-                    }
+                    if (type == ChunkType.HighQuality)
+                        GenerateNormalChunkTask(chunkPos);
+                    else
+                        GenerateLowPolyChunkTask(chunkPos, level);
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Error generating chunk {chunkPos}: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine(
+                        $"Error generating chunk {chunkPos} level {level}: {ex.Message}");
                 }
                 finally
                 {
@@ -539,102 +430,87 @@ namespace game
             });
         }
 
-        /// <summary>
-        /// Genera un chunk normal con detalle completo.
-        /// </summary>
+        // ============================================================
+        //  GENERACION HQ
+        // ============================================================
+
         private void GenerateNormalChunkTask(Vector3Int chunkPos)
         {
-            // 1. GENERAR BLOQUES DEL CHUNK (en thread worker, con cache global)
             byte[,,] blocks = _worldGenerator.GetOrGenerateChunk(
                 chunkPos.X, chunkPos.Y, chunkPos.Z, _chunkSize);
 
-            // 2. OBTENER REFERENCIA AL CHUNK
             Chunk chunk = null;
             lock (_chunkLock)
             {
                 if (_chunks.TryGetValue(chunkPos, out chunk))
-                {
-                    // Establecer los bloques
                     chunk.SetBlocks(blocks);
-                }
             }
+            if (chunk == null) return;
 
-            if (chunk == null)
-                return;  // Chunk fue descargado mientras se generaba
-
-            // 3. GENERAR MALLA USANDO GREEDY MESHING (en thread worker)
             chunk.MarkMeshBuildStart();
 
-            // Obtener chunks vecinos para oclusión (thread-safe: solo lectura)
             Chunk[,,] neighbors = new Chunk[3, 3, 3];
             lock (_chunkLock)
             {
                 for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
+                for (int dz = -1; dz <= 1; dz++)
                 {
-                    for (int dy = -1; dy <= 1; dy++)
-                    {
-                        for (int dz = -1; dz <= 1; dz++)
-                        {
-                            var neighborPos = new Vector3Int(
-                                chunkPos.X + dx,
-                                chunkPos.Y + dy,
-                                chunkPos.Z + dz);
-
-                            _chunks.TryGetValue(neighborPos, out var neighbor);
-                            neighbors[dx + 1, dy + 1, dz + 1] = neighbor;
-                        }
-                    }
+                    var np = new Vector3Int(chunkPos.X + dx, chunkPos.Y + dy, chunkPos.Z + dz);
+                    _chunks.TryGetValue(np, out neighbors[dx+1, dy+1, dz+1]);
                 }
             }
 
             var mesher = new GreedyMesher(chunk, neighbors, _chunkSize);
             var (vertices, indices, debugInfo) = mesher.GenerateMesh();
 
-            // 4. ENCOLAR DATOS DE MALLA PARA MAIN THREAD
             if (vertices != null && indices != null)
             {
                 lock (_meshQueueLock)
                 {
                     _meshDataQueue.Enqueue(new MeshData
                     {
-                        ChunkPos = chunkPos,
-                        Vertices = vertices,
-                        Indices = indices,
+                        ChunkPos  = chunkPos,
+                        Vertices  = vertices,
+                        Indices   = indices,
                         DebugInfo = debugInfo
                     });
                 }
             }
         }
 
-        /// <summary>
-        /// Genera un chunk LOD simplificado para renderizado a distancia.
-        /// IMPORTANTE: Obtiene bloques del CACHE completo y usa GenerateLowPolyChunk
-        /// para generar SOLO la superficie (sin underground).
-        /// </summary>
-        private void GenerateLowPolyChunkTask(Vector3Int chunkPos)
-        {
-            // 1. GENERAR BLOQUES SIMPLIFICADOS (solo superficie, sin underground)
-            byte[,,] blocks = _worldGenerator.GenerateLowPolyChunk(
-                chunkPos.X, chunkPos.Y, chunkPos.Z, _chunkSize);
+        // ============================================================
+        //  GENERACION LP - un nivel a la vez
+        // ============================================================
 
-            // 2. OBTENER REFERENCIA AL LOWPOLY CHUNK
-            LowPolyChunk chunk = null;
+        private void GenerateLowPolyChunkTask(Vector3Int chunkPos, int level)
+        {
+            // Verificar que el chunk sigue existiendo (pudo descartarse mientras esperaba en cola)
             lock (_chunkLock)
             {
-                if (_lowPolyChunks.TryGetValue(chunkPos, out chunk))
-                {
-                    chunk.SetBlocks(blocks);
-                }
+                if (!_lowPolyChunks.TryGetValue(chunkPos, out var lpCheck)) return;
+                if (lpCheck.HasMeshForLevel(level)) return;
+                // MarkMeshBuildStart ya fue llamado en StartChunkGenerationTask bajo el mismo lock
             }
 
-            if (chunk == null)
-                return;
+            // Generar bloques para este nivel (arboles con densidad distinta)
+            byte[,,] blocks = _worldGenerator.GenerateLowPolyChunk(
+                chunkPos.X, chunkPos.Y, chunkPos.Z, _chunkSize,
+                simplificationLevel: level);
 
-            // 3. GENERAR MALLA SIMPLE (sin greedy meshing, solo cubos básicos)
-            chunk.MarkMeshBuildStart();
+            // Actualizar bloque-base del chunk real (nivel 0 = referencia compartida)
+            lock (_chunkLock)
+            {
+                if (_lowPolyChunks.TryGetValue(chunkPos, out var lp))
+                    lp.SetBlocksForLevel(blocks, level);
+            }
 
-            var simpleMesher = new SimpleLowPolyMesher(chunk, _chunkSize);
-            var (vertices, indices) = simpleMesher.GenerateMesh();
+            // Usar un chunk temporal para no pisar el estado del chunk real
+            var tempChunk = new LowPolyChunk(chunkPos.X, chunkPos.Y, chunkPos.Z, _chunkSize);
+            tempChunk.SetBlocksForLevel(blocks, 0);
+
+            var mesher = new SimpleLowPolyMesher(tempChunk, _chunkSize, simplificationLevel: level);
+            var (vertices, indices) = mesher.GenerateMesh();
 
             if (vertices != null && indices != null)
             {
@@ -644,241 +520,126 @@ namespace game
                     {
                         ChunkPos = chunkPos,
                         Vertices = vertices,
-                        Indices = indices
+                        Indices  = indices,
+                        Level    = level
                     });
+                }
+            }
+            else
+            {
+                // FIX: Chunk vacío → SetMeshData(null, null) marca _levelFailed[level] = true
+                // en LowPolyChunk, previniendo que NeedsMesh() lo re-encole en el futuro.
+                lock (_chunkLock)
+                {
+                    if (_lowPolyChunks.TryGetValue(chunkPos, out var lp))
+                        lp.SetMeshData(null, null, _graphicsDevice, level);
                 }
             }
         }
 
-        /// <summary>
-        /// Genera un chunk ULTRA simplificado (solo heightmap) para renderizado a MUCHA distancia.
-        /// </summary>
-        // private void GenerateVeryLowPolyChunkTask(Vector3Int chunkPos)
-        // {
-        //     // 1. GENERAR HEIGHTMAP (solo alturas, sin datos 3D completos)
-        //     int[,] heightMap = _worldGenerator.GenerateVeryLowPolyChunk(
-        //         chunkPos.X, chunkPos.Y, chunkPos.Z, _chunkSize);
+        // ============================================================
+        //  PROCESAR MALLAS (MAIN THREAD)
+        // ============================================================
 
-        //     // 2. OBTENER REFERENCIA AL VERYLOWPOLY CHUNK
-        //     VeryLowPolyChunk chunk = null;
-        //     lock (_chunkLock)
-        //     {
-        //         if (_veryLowPolyChunks.TryGetValue(chunkPos, out chunk))
-        //         {
-        //             chunk.SetHeightMap(heightMap);
-        //         }
-        //     }
-
-        //     if (chunk == null)
-        //         return;
-
-        //     // 3. GENERAR MALLA ULTRA SIMPLIFICADA (grid basado en heightmap)
-        //     chunk.MarkMeshBuildStart();
-
-        //     var verySimpleMesher = new VeryLowPolyMesher(chunk, _chunkSize);
-        //     var (vertices, indices) = verySimpleMesher.GenerateMesh();
-
-        //     if (vertices != null && indices != null)
-        //     {
-        //         lock (_meshQueueLock)
-        //         {
-        //             _veryLowPolyMeshDataQueue.Enqueue(new MeshDataVeryLowPoly
-        //             {
-        //                 ChunkPos = chunkPos,
-        //                 Vertices = vertices,
-        //                 Indices = indices
-        //             });
-        //         }
-        //     }
-        // }
-
-        /// <summary>
-        /// Procesa datos de malla listos en la cola y los asigna a chunks (MAIN THREAD).
-        /// Crea VertexBuffer e IndexBuffer aquí, no en threads workers.
-        /// 
-        /// IMPORTANTE: LP es PERSISTENTE como fallback. Se mantiene en memoria.
-        /// Solo se renderiza si HQ no tiene mesh en la misma posición.
-        /// Se borra permanentemente solo cuando está muy lejano (en UpdateVisibleChunks).
-        /// </summary>
         private void ProcessMeshDataQueue()
         {
             lock (_meshQueueLock)
             {
-                // Procesar colas de chunks normales (HighQuality)
                 while (_meshDataQueue.Count > 0)
                 {
-                    var meshData = _meshDataQueue.Dequeue();
-
+                    var md = _meshDataQueue.Dequeue();
                     lock (_chunkLock)
                     {
-                        if (_chunks.TryGetValue(meshData.ChunkPos, out var chunk))
-                        {
-                            chunk.SetMeshData(meshData.Vertices, meshData.Indices, _graphicsDevice, meshData.DebugInfo);
-                            // LP se mantiene como respaldo y solo se renderiza si HQ no tiene mesh
-                        }
+                        if (_chunks.TryGetValue(md.ChunkPos, out var chunk))
+                            chunk.SetMeshData(md.Vertices, md.Indices, _graphicsDevice, md.DebugInfo);
                     }
                 }
 
-                // Procesar colas de chunks lowpoly
                 while (_lowPolyMeshDataQueue.Count > 0)
                 {
-                    var meshData = _lowPolyMeshDataQueue.Dequeue();
-
+                    var md = _lowPolyMeshDataQueue.Dequeue();
                     lock (_chunkLock)
                     {
-                        if (_lowPolyChunks.TryGetValue(meshData.ChunkPos, out var chunk))
-                        {
-                            chunk.SetMeshData(meshData.Vertices, meshData.Indices, _graphicsDevice);
-                        }
+                        if (_lowPolyChunks.TryGetValue(md.ChunkPos, out var chunk))
+                            chunk.SetMeshData(md.Vertices, md.Indices, _graphicsDevice, md.Level);
                     }
                 }
-
-                // // Procesar colas de chunks verylowpoly
-                // while (_veryLowPolyMeshDataQueue.Count > 0)
-                // {
-                //     var meshData = _veryLowPolyMeshDataQueue.Dequeue();
-
-                //     lock (_chunkLock)
-                //     {
-                //         if (_veryLowPolyChunks.TryGetValue(meshData.ChunkPos, out var chunk))
-                //         {
-                //             chunk.SetMeshData(meshData.Vertices, meshData.Indices, _graphicsDevice);
-                //         }
-                //     }
-                // }
             }
         }
 
-        /// <summary>
-        /// Renderiza todos los chunks visibles (normales y lowpoly).
-        /// 
-        /// LÓGICA DE RENDERIZADO:
-        /// 1. Renderiza HQ si existe y tiene mesh → está en frustum
-        /// 2. Renderiza LP solo si:
-        ///    - NO existe HQ en la misma posición (o HQ sin mesh aún)
-        ///    - LP tiene mesh
-        ///    - LP está en frustum
-        /// 
-        /// LP es respaldo permanente, nunca se elimina forzadamente cuando HQ está listo.
-        /// </summary>
-        public void Draw(BasicEffect effect, BoundingFrustum cameraFrustum, Vector3Int? currentChunk = null, bool wireframeOnly = false)
+        // ============================================================
+        //  DRAW
+        // ============================================================
+
+        public void Draw(BasicEffect effect, BoundingFrustum cameraFrustum,
+                         Vector3Int? currentChunk = null, bool wireframeOnly = false)
         {
             lock (_chunkLock)
             {
-                // Renderizar chunks de alta calidad (HQ)
+                // HQ
                 foreach (var chunk in _chunks.Values.ToList())
                 {
-                    if (wireframeOnly)
-                    {
-                        if (currentChunk.HasValue && 
-                            (chunk.X != currentChunk.Value.X || 
-                             chunk.Z != currentChunk.Value.Z))
-                            continue;
-                    }
+                    if (wireframeOnly && currentChunk.HasValue &&
+                        (chunk.X != currentChunk.Value.X || chunk.Z != currentChunk.Value.Z))
+                        continue;
 
-                    // Solo renderizar si está en frustum y tiene mesh
                     if (chunk.HasMesh && IsChunkInFrustum(chunk.X, chunk.Y, chunk.Z, cameraFrustum))
                     {
-                        Vector3 chunkWorldPosition = new Vector3(
-                            chunk.X * _chunkSize,
-                            chunk.Y * _chunkSize,
-                            chunk.Z * _chunkSize);
-
-                        effect.World = Matrix.CreateTranslation(chunkWorldPosition);
+                        effect.World = Matrix.CreateTranslation(
+                            chunk.X * _chunkSize, chunk.Y * _chunkSize, chunk.Z * _chunkSize);
                         effect.CurrentTechnique.Passes[0].Apply();
                         chunk.Draw(_graphicsDevice, cameraFrustum);
                     }
                 }
 
-                // Renderizar chunks lowpoly (respaldo si no hay HQ o HQ sin mesh)
+                // LP (solo si HQ no tiene mesh)
                 foreach (var chunk in _lowPolyChunks.Values.ToList())
                 {
-                    if (!chunk.HasMesh || !IsChunkInFrustum(chunk.X, chunk.Y, chunk.Z, cameraFrustum))
+                    if (!chunk.HasMesh ||
+                        !IsChunkInFrustum(chunk.X, chunk.Y, chunk.Z, cameraFrustum))
                         continue;
 
                     var hqPos = new Vector3Int(chunk.X, chunk.Y, chunk.Z);
-                    bool hqExists = _chunks.TryGetValue(hqPos, out var hqChunk);
-                    bool hqHasMesh = hqExists && hqChunk.HasMesh;
-
-                    // Solo renderizar LP si NO hay HQ con mesh en la misma posición
-                    if (hqHasMesh)
+                    if (_chunks.TryGetValue(hqPos, out var hqChunk) && hqChunk.HasMesh)
                         continue;
 
-                    Vector3 chunkWorldPosition = new Vector3(
-                        chunk.X * _chunkSize,
-                        chunk.Y * _chunkSize,
-                        chunk.Z * _chunkSize);
-
-                    effect.World = Matrix.CreateTranslation(chunkWorldPosition);
+                    effect.World = Matrix.CreateTranslation(
+                        chunk.X * _chunkSize, chunk.Y * _chunkSize, chunk.Z * _chunkSize);
                     effect.CurrentTechnique.Passes[0].Apply();
                     chunk.Draw(_graphicsDevice, cameraFrustum);
                 }
-
-                // // Renderizar chunks verylowpoly (respaldo si no hay HQ ni LP)
-                // foreach (var chunk in _veryLowPolyChunks.Values.ToList())
-                // {
-                //     if (!chunk.HasMesh || !IsChunkInFrustum(chunk.X, chunk.Y, chunk.Z, cameraFrustum))
-                //         continue;
-
-                //     var hqPos = new Vector3Int(chunk.X, chunk.Y, chunk.Z);
-                //     bool hqExists = _chunks.TryGetValue(hqPos, out var hqChunk);
-                //     bool hqHasMesh = hqExists && hqChunk.HasMesh;
-                //     bool lpExists = _lowPolyChunks.TryGetValue(hqPos, out var lpChunk);
-                //     bool lpHasMesh = lpExists && lpChunk.HasMesh;
-
-                //     // Solo renderizar VeryLP si NO hay HQ ni LP con mesh en la misma posición
-                //     if (hqHasMesh || lpHasMesh)
-                //         continue;
-
-                //     Vector3 chunkWorldPosition = new Vector3(
-                //         chunk.X * _chunkSize,
-                //         chunk.Y * _chunkSize,
-                //         chunk.Z * _chunkSize);
-
-                //     effect.World = Matrix.CreateTranslation(chunkWorldPosition);
-                //     effect.CurrentTechnique.Passes[0].Apply();
-                //     chunk.Draw(_graphicsDevice, cameraFrustum);
-                // }
             }
         }
 
-        /// <summary>
-        /// Obtiene un chunk en una posición (con bounds checking).
-        /// </summary>
+        // ============================================================
+        //  HELPERS PUBLICOS
+        // ============================================================
+
         public Chunk GetChunk(Vector3Int pos)
         {
-            lock (_chunkLock)
-            {
-                _chunks.TryGetValue(pos, out var chunk);
-                return chunk;
-            }
+            lock (_chunkLock) { _chunks.TryGetValue(pos, out var c); return c; }
         }
 
-        /// <summary>
-        /// Obtiene el bloque en coordenadas mundiales.
-        /// </summary>
         public byte GetBlockAtWorldPosition(Vector3 worldPos)
         {
-            Vector3Int chunkPos = GetChunkCoordinates(worldPos);
-            var chunk = GetChunk(chunkPos);
+            var chunkPos = GetChunkCoordinates(worldPos);
+            var chunk    = GetChunk(chunkPos);
+            if (chunk == null) return BlockType.Air;
 
-            if (chunk == null)
-                return BlockType.Air;
+            int lx = (int)worldPos.X % _chunkSize;
+            int ly = (int)worldPos.Y % _chunkSize;
+            int lz = (int)worldPos.Z % _chunkSize;
+            if (lx < 0) lx += _chunkSize;
+            if (ly < 0) ly += _chunkSize;
+            if (lz < 0) lz += _chunkSize;
 
-            int localX = (int)worldPos.X % _chunkSize;
-            int localY = (int)worldPos.Y % _chunkSize;
-            int localZ = (int)worldPos.Z % _chunkSize;
-
-            // Manejar coordenadas negativas
-            if (localX < 0) localX += _chunkSize;
-            if (localY < 0) localY += _chunkSize;
-            if (localZ < 0) localZ += _chunkSize;
-
-            return chunk.GetBlock(localX, localY, localZ);
+            return chunk.GetBlock(lx, ly, lz);
         }
 
         /// <summary>
-        /// Retorna el número total de chunks cargados.
+        /// Chunks con mesh real en GPU (los que se renderizan o están construyéndose).
+        /// Excluye los LP marcados como fallidos (chunks de aire puro sin geometría).
+        /// Este es el número relevante para el HUD.
         /// </summary>
         public int LoadedChunkCount
         {
@@ -886,57 +647,55 @@ namespace game
             {
                 lock (_chunkLock)
                 {
-                    return _chunks.Count + _lowPolyChunks.Count;
+                    int lp = 0;
+                    foreach (var c in _lowPolyChunks.Values)
+                    {
+                        // Contar solo si tiene al menos un nivel con mesh o en construcción
+                        bool active = false;
+                        for (int i = 0; i < LowPolyChunk.LOD_LEVELS; i++)
+                            if (c.HasMeshForLevel(i) || c.IsMeshBuildingForLevel(i)) { active = true; break; }
+                        if (active) lp++;
+                    }
+                    return _chunks.Count + lp;
                 }
             }
         }
 
-        /// <summary>
-        /// Retorna el número de chunks en cola de generación.
-        /// </summary>
+        /// <summary>Total de entradas en los diccionarios (incluye chunks aire puro).</summary>
+        public int TotalChunkEntries
+        {
+            get { lock (_chunkLock) return _chunks.Count + _lowPolyChunks.Count; }
+        }
+
         public int GenerationQueueCount
         {
-            get
-            {
-                lock (_queueLock)
-                {
-                    return _generationQueue.Count;
-                }
-            }
+            get { lock (_queueLock) return _generationQueue.Count; }
         }
 
-        /// <summary>
-        /// Limpia todos los recursos.
-        /// </summary>
+        /// <summary>Tasks de generación activas en el ThreadPool en este momento.</summary>
+        public int ActiveGenerationTasks => _activeGenerationTasks;
+
         public void Dispose()
         {
             lock (_chunkLock)
             {
-                foreach (var chunk in _chunks.Values)
-                {
-                    chunk.Dispose();
-                }
+                foreach (var c in _chunks.Values)        c.Dispose();
+                foreach (var c in _lowPolyChunks.Values) c.Dispose();
                 _chunks.Clear();
-
-                foreach (var chunk in _lowPolyChunks.Values)
-                {
-                    chunk.Dispose();
-                }
                 _lowPolyChunks.Clear();
-
-                // foreach (var chunk in _veryLowPolyChunks.Values)
-                // {
-                //     chunk.Dispose();
-                // }
-                // _veryLowPolyChunks.Clear();
             }
         }
+
+        private Vector3 ChunkCenter(Vector3Int pos) =>
+            new Vector3(pos.X * _chunkSize + _chunkSize / 2f,
+                        pos.Y * _chunkSize + _chunkSize / 2f,
+                        pos.Z * _chunkSize + _chunkSize / 2f);
     }
 
-    /// <summary>
-    /// Datos de malla listos para ser asignados a un chunk (thread-safe transfer).
-    /// Se crea en thread worker y se procesa en main thread.
-    /// </summary>
+    // ============================================================
+    //  STRUCTS DE TRANSFERENCIA
+    // ============================================================
+
     internal struct MeshData
     {
         public Vector3Int ChunkPos;
@@ -950,6 +709,7 @@ namespace game
         public Vector3Int ChunkPos;
         public VertexPositionNormalColor[] Vertices;
         public ushort[] Indices;
+        public int Level;
     }
 
     internal struct MeshDataVeryLowPoly
@@ -959,32 +719,25 @@ namespace game
         public ushort[] Indices;
     }
 
-    /// <summary>
-    /// Vector 3D con enteros. Usado para coordenadas de chunks.
-    /// No existe en MonoGame, así que lo implementamos.
-    /// </summary>
+    // ============================================================
+    //  VECTOR3INT
+    // ============================================================
+
     public struct Vector3Int : IEquatable<Vector3Int>
     {
         public int X, Y, Z;
-
-        public Vector3Int(int x, int y, int z)
-        {
-            X = x;
-            Y = y;
-            Z = z;
-        }
+        public Vector3Int(int x, int y, int z) { X = x; Y = y; Z = z; }
 
         public static Vector3Int Zero => new Vector3Int(0, 0, 0);
-        public static Vector3Int One => new Vector3Int(1, 1, 1);
+        public static Vector3Int One  => new Vector3Int(1, 1, 1);
 
-        public override bool Equals(object obj) => obj is Vector3Int other && Equals(other);
-        public bool Equals(Vector3Int other) => X == other.X && Y == other.Y && Z == other.Z;
+        public override bool Equals(object obj) => obj is Vector3Int o && Equals(o);
+        public bool Equals(Vector3Int o) => X == o.X && Y == o.Y && Z == o.Z;
         public override int GetHashCode() => HashCode.Combine(X, Y, Z);
 
-        public static bool operator ==(Vector3Int left, Vector3Int right) => left.Equals(right);
-        public static bool operator !=(Vector3Int left, Vector3Int right) => !left.Equals(right);
-
-        public static Vector3Int operator +(Vector3Int a, Vector3Int b) 
+        public static bool operator ==(Vector3Int a, Vector3Int b) => a.Equals(b);
+        public static bool operator !=(Vector3Int a, Vector3Int b) => !a.Equals(b);
+        public static Vector3Int operator +(Vector3Int a, Vector3Int b)
             => new Vector3Int(a.X + b.X, a.Y + b.Y, a.Z + b.Z);
 
         public override string ToString() => $"({X}, {Y}, {Z})";
