@@ -23,7 +23,7 @@ namespace game
         private float _pitch;    // Rotación en X (arriba/abajo)
 
         // Configuración de movimiento
-        private float _moveSpeed = 50f;      // Unidades por segundo
+        private float _moveSpeed = 30f;      // Unidades por segundo
         private float _mouseSensitivity = 0.002f;  // Radianes por píxel
 
         // Límites
@@ -41,7 +41,7 @@ namespace game
         private Matrix _projectionMatrix;
 
         public Camera(Vector3 startPosition, float aspectRatio, GraphicsDevice graphicsDevice, float fov = MathHelper.PiOver4,
-            float nearPlane = 0.1f, float farPlane = 1000f)
+            float nearPlane = 0.1f, float farPlane = 10000f)
         {
             _position = startPosition;
             _yaw = 0f;

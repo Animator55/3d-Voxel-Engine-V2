@@ -56,7 +56,7 @@ namespace game
         // Con LodDistY=1 y el jugador en chunkY≈2 se cubren chunkY 1–3.
         // LodDistY=3 cargaba chunkY 4–5 (Y 128–191) que son SIEMPRE aire puro:
         // se marcaban _levelFailed pero seguían en el dict inflando TotalChunkEntries.
-        private const int LodDistY = 3;
+        private const int LodDistY = 1;
 
         private readonly object _chunkLock     = new object();
         private readonly object _queueLock     = new object();
@@ -145,15 +145,20 @@ namespace game
             var lowPolyZone      = new HashSet<Vector3Int>();
             var chunksToGenerate = new List<(Vector3Int pos, ChunkType type, int level)>();
 
-            // ZONA HQ
+            // ZONA HQ — cilindro XZ, no esfera 3D.
+            // Con esfera: subir en Y reducía el radio XZ disponible → chunks cercanos
+            // en XZ desaparecían al volar. Con cilindro: el radio XZ es siempre fijo,
+            // solo Y está acotado por un rango independiente.
+            const int HqDistY = 3; // ±3 chunks en Y = ±96 bloques con chunkSize=32
             for (int x = -_loadDistance; x <= _loadDistance; x++)
-            for (int y = -_loadDistance; y <= _loadDistance; y++)
+            for (int y = -HqDistY; y <= HqDistY; y++)
             for (int z = -_loadDistance; z <= _loadDistance; z++)
             {
                 int chunkY = centerChunk.Y + y;
                 if (chunkY < 0) continue;
 
-                if ((float)Math.Sqrt(x*x + y*y + z*z) <= _loadDistance + 0.5f)
+                // Radio XZ circular, Y independiente
+                if ((float)Math.Sqrt(x*x + z*z) <= _loadDistance + 0.5f)
                     highQualityZone.Add(new Vector3Int(centerChunk.X + x, chunkY, centerChunk.Z + z));
             }
 
@@ -165,7 +170,7 @@ namespace game
             for (int y = -LodDistY; y <= LodDistY; y++)
             for (int z = -lodXZ; z <= lodXZ; z++)
             {
-                int chunkY = centerChunk.Y + y;
+                int chunkY = 1 + y;
                 if (chunkY < 0) continue;
 
                 var chunkPos = new Vector3Int(centerChunk.X + x, chunkY, centerChunk.Z + z);
@@ -248,7 +253,7 @@ namespace game
                     {
                         int dx = p.X - centerChunk.X;
                         int dz = p.Z - centerChunk.Z;
-                        int dy = p.Y - centerChunk.Y;
+                        int dy = p.Y - 1;
                         return dx*dx + dz*dz > lodXZFar * lodXZFar
                             || Math.Abs(dy) > LodDistY + 1;
                     })
@@ -443,11 +448,16 @@ namespace game
             lock (_chunkLock)
             {
                 if (_chunks.TryGetValue(chunkPos, out chunk))
+                {
                     chunk.SetBlocks(blocks);
+                    // MarkMeshBuildStart DENTRO del lock: evita que el chunk sea
+                    // descartado por UpdateVisibleChunks entre el TryGetValue y el Mark,
+                    // lo que dejaba el chunk en estado "building" sin resolverse nunca.
+                    chunk.MarkMeshBuildStart();
+                }
             }
+            // Si el chunk fue descartado antes de que llegáramos, no hay nada que hacer.
             if (chunk == null) return;
-
-            chunk.MarkMeshBuildStart();
 
             Chunk[,,] neighbors = new Chunk[3, 3, 3];
             lock (_chunkLock)
@@ -464,6 +474,19 @@ namespace game
             var mesher = new GreedyMesher(chunk, neighbors, _chunkSize);
             var (vertices, indices, debugInfo) = mesher.GenerateMesh();
 
+            // Verificar que el chunk sigue vivo antes de encolar la mesh.
+            // Si fue descartado mientras generábamos, no encolamos nada
+            // pero sí resolvemos el estado building para que no quede colgado.
+            lock (_chunkLock)
+            {
+                if (!_chunks.ContainsKey(chunkPos))
+                {
+                    // Chunk descartado durante la generación: el objeto ya fue
+                    // Dispose()-ado por UpdateVisibleChunks, no tocar su estado.
+                    return;
+                }
+            }
+
             if (vertices != null && indices != null)
             {
                 lock (_meshQueueLock)
@@ -475,6 +498,17 @@ namespace game
                         Indices   = indices,
                         DebugInfo = debugInfo
                     });
+                }
+            }
+            else
+            {
+                // Chunk de aire puro (cueva completa, chunk muy alto, etc).
+                // Sin este caso, IsMeshBuilding queda true para siempre
+                // y el chunk aparece como "hueco" en el HUD y no se renderiza.
+                lock (_chunkLock)
+                {
+                    if (_chunks.TryGetValue(chunkPos, out var c))
+                        c.MarkMeshEmpty();
                 }
             }
         }

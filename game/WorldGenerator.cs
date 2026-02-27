@@ -180,7 +180,7 @@ namespace game
                     float riverBottom = SeaLevel - 3f;
                     h = h * (1f - riverInfluence) + riverBottom * riverInfluence;
 
-                    if (riverInfluence > 0.3f)
+                    if (riverInfluence > 0.2f)
                         isRiver = true;
                 }
             }
@@ -273,15 +273,10 @@ namespace game
                 };
             }
 
-            int dirtDepth = (biome == BiomeType.Mountains || biome == BiomeType.SnowPeaks) ? 1 : 3;
+            int dirtDepth = 3;
             if (wy >= terrainHeight - dirtDepth)
             {
-                return biome switch
-                {
-                    BiomeType.Mountains  => BlockType.Stone,
-                    BiomeType.SnowPeaks  => BlockType.Stone,
-                    _                    => BlockType.Dirt,
-                };
+                return BlockType.Dirt;
             }
 
             return BlockType.Stone;
@@ -567,6 +562,10 @@ namespace game
                             blocks[bx, by, bz] = wy == terrainHeight
                                 ? GetSurfaceBlock(biome, isRiver)
                                 : BlockType.Dirt;
+                        }
+                        else if(wy >= SeaLevel && wy < terrainHeight - simplifiedCheck)
+                        {
+                            blocks[bx, by, bz] = BlockType.Stone;
                         }
                         else if (wy <= SeaLevel && wy > terrainHeight)
                         {

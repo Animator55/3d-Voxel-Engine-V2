@@ -162,6 +162,16 @@ namespace game
             }
         }
 
+        /// <summary>
+        /// Marca el chunk como "generado pero vacío" (sin geometría).
+        /// Resuelve el estado IsMeshBuilding sin subir ningún buffer a GPU.
+        /// Equivalente a SetMeshData(null, null) pero sin tocar buffers.
+        /// </summary>
+        public void MarkMeshEmpty()
+        {
+            _isMeshBuilding = false;
+        }
+
         // ============ Construcción de Malla (Main Thread) ============
         /// <summary>
         /// Proporciona los datos de vértices e índices generados en un thread worker.

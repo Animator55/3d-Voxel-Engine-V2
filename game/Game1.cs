@@ -16,7 +16,7 @@ namespace game
         private ChunkManager _chunkManager;
 
         private const int ChunkSize = 32;
-        private const int LoadDistance = 4;
+        private const int LoadDistance = 6;
 
         // ── UI ──────────────────────────────────────────────────────
         private SpriteBatch _spriteBatch;
@@ -76,7 +76,7 @@ namespace game
                 graphicsDevice: GraphicsDevice,
                 fov:            MathHelper.PiOver2 - 0.1f,
                 nearPlane:      0.1f,
-                farPlane:       1000f);
+                farPlane:       10000f);
 
             _chunkManager = new ChunkManager(GraphicsDevice, ChunkSize, LoadDistance);
 
@@ -95,7 +95,7 @@ namespace game
                 VertexColorEnabled = true,
                 LightingEnabled    = true,
                 AmbientLightColor  = new Vector3(0.5f, 0.5f, 0.5f),
-                FogEnabled         = false,
+                FogEnabled         = true,
                 FogStart           = LoadDistance * 2 * 24f,
                 FogColor           = new Vector3(135f / 255f, 206f / 255f, 235f / 255f),
                 FogEnd             = LoadDistance * 2 * 35f,
