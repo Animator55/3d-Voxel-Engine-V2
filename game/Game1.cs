@@ -95,10 +95,10 @@ namespace game
                 VertexColorEnabled = true,
                 LightingEnabled    = true,
                 AmbientLightColor  = new Vector3(0.5f, 0.5f, 0.5f),
-                FogEnabled         = false,
+                FogEnabled         = true,
                 FogStart           = LoadDistance * 2 * 24f,
                 FogColor           = new Vector3(135f / 255f, 206f / 255f, 235f / 255f),
-                FogEnd             = LoadDistance * 2 * 35f,
+                FogEnd             = LoadDistance * 4 * 24f,
             };
             _effect.DirectionalLight0.Enabled      = true;
             _effect.DirectionalLight0.Direction    = Vector3.Normalize(new Vector3(1, -1, 0.5f));
