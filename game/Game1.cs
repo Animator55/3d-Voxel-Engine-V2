@@ -95,7 +95,7 @@ namespace game
                 VertexColorEnabled = true,
                 LightingEnabled    = true,
                 AmbientLightColor  = new Vector3(0.5f, 0.5f, 0.5f),
-                FogEnabled         = true,
+                FogEnabled         = false,
                 FogStart           = LoadDistance * 2 * 24f,
                 FogColor           = new Vector3(135f / 255f, 206f / 255f, 235f / 255f),
                 FogEnd             = LoadDistance * 2 * 35f,

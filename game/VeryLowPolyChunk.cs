@@ -4,12 +4,6 @@ using System;
 
 namespace game
 {
-    /// <summary>
-    /// Chunk ULTRA simplificado para renderizado a MUCHA distancia.
-    /// Solo renderiza el heightmap (superficie del terreno).
-    /// Mucho más ligero que LowPolyChunk para chunks muy lejanos.
-    /// Compatible con el sistema actual de ChunkManager.
-    /// </summary>
     public class VeryLowPolyChunk
     {
         public int X { get; private set; }
@@ -30,15 +24,13 @@ namespace game
         private BoundingBox _boundingBox;
         private readonly object _meshLock = new object();
 
-        public bool IsDirty       => _isDirty;
+        public bool IsDirty        => _isDirty;
         public bool IsMeshBuilding => _isMeshBuilding;
-        public bool HasMesh       => _vertexBuffer != null && _indexBuffer != null && _indices != null;
+        public bool HasMesh        => _vertexBuffer != null && _indexBuffer != null && _indices != null;
 
         public VeryLowPolyChunk(int x, int y, int z, int size = 16)
         {
-            X = x;
-            Y = y;
-            Z = z;
+            X = x; Y = y; Z = z;
             _size = size;
 
             _heightMap = new int[size, size];
@@ -56,8 +48,13 @@ namespace game
 
         public void SetHeightMap(int[,] heightMap)
         {
-            if (heightMap.GetLength(0) != _size || heightMap.GetLength(1) != _size)
-                throw new ArgumentException($"HeightMap debe ser {_size}x{_size}");
+            int dim0 = heightMap.GetLength(0);
+            int dim1 = heightMap.GetLength(1);
+
+            if ((dim0 != _size && dim0 != _size + 2) ||
+                (dim1 != _size && dim1 != _size + 2))
+                throw new ArgumentException(
+                    $"HeightMap debe ser {_size}x{_size} o {_size+2}x{_size+2}, recibido {dim0}x{dim1}");
 
             _heightMap = (int[,])heightMap.Clone();
             _isDirty   = true;
@@ -79,12 +76,26 @@ namespace game
             lock (_meshLock)
             {
                 _isMeshBuilding = false;
+                // FIX: no resetear _isDirty aquí — si la malla está vacía
+                // porque el mesher devolvió null (p.ej. capa plana), no queremos
+                // re-intentarlo indefinidamente. Queda en IsDirty=false / HasMesh=false
+                // y el chunk simplemente no se dibuja. Correcto para VLPs bajo tierra.
             }
         }
 
         /// <summary>
-        /// Establece los datos de malla. Llamar SOLO desde main thread.
+        /// Para cuando falla la generación. Resetea IsMeshBuilding Y marca IsDirty=true
+        /// para permitir reintento en el próximo UpdateVisibleChunks.
         /// </summary>
+        public void MarkMeshFailed()
+        {
+            lock (_meshLock)
+            {
+                _isMeshBuilding = false;
+                _isDirty        = true;
+            }
+        }
+
         public void SetMeshData(VertexPositionNormalColor[] vertices, ushort[] indices,
                                 GraphicsDevice graphicsDevice)
         {
@@ -113,6 +124,7 @@ namespace game
                 }
 
                 _isMeshBuilding = false;
+                // _isDirty ya fue puesto a false en MarkMeshBuildStart
             }
         }
 
@@ -136,8 +148,8 @@ namespace game
 
         private void UpdateBoundingBox()
         {
-            Vector3 min = new Vector3(X * _size, 0,         Z * _size);
-            Vector3 max = new Vector3(X * _size + _size, 256, Z * _size + _size);
+            Vector3 min = new Vector3(X * _size,           0,  Z * _size);
+            Vector3 max = new Vector3(X * _size + _size, 256,  Z * _size + _size);
             _boundingBox = new BoundingBox(min, max);
         }
 

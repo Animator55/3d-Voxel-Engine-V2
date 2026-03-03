@@ -5,42 +5,25 @@ namespace game
 {
     /// <summary>
     /// Generador procedural de mundo v3.
+    /// (sin cambios en GenerateChunk / GenerateLowPolyChunk)
     ///
-    /// CAMBIOS RESPECTO A V2:
-    /// - BIOMAS NATURALIZADOS:
-    ///     Se eliminan los cortes duros bioma→bioma. Cada punto del mundo
-    ///     calcula un vector de pesos suaves (SoftBiomeWeights) usando
-    ///     SmoothStep sobre temperatura y humedad muestreadas con domain
-    ///     warp. La altura final es la suma ponderada de todas las alturas
-    ///     de bioma — no hay umbral abrupto entre Plains y Mountains.
-    ///
-    /// - SIN ZONAS DE INFLUENCIA DE MONTAÑAS:
-    ///     Se eliminó el bloque de influencia en radio fijo. Ahora las
-    ///     transiciones son puramente por los pesos suaves, evitando los
-    ///     "hombros" de montaña que se veían en la V2.
-    ///
-    /// - CUEVAS SIMPLIFICADAS:
-    ///     Un solo Perlin 3D de escala grande (40) con umbral alto (0.72).
-    ///     Genera cavidades espaciadas y bien formadas sin ruido excesivo.
-    ///     Fade de 6 bloques bajo superficie para evitar agujeros en techo.
-    ///
-    /// - RÍOS MÁS ANCHOS: umbral bajado de 0.70 → 0.55.
-    /// - TERRENO MÁS SUAVE: domain warp reducido de 80 → 30 bloques.
-    ///
-    /// SIMPLIFICATION LEVELS (para LOD): sin cambios respecto a V2.
+    /// CAMBIO: GenerateVeryLowPolyChunk ahora genera un heightmap
+    /// de dimensión (chunkSize+2)x(chunkSize+2) con 1 bloque de margen
+    /// en cada borde — igual que HeightmapChunk del proyecto de referencia.
+    /// Esto permite que el VeryLowPolyMesher genere vértices de borde
+    /// que coincidan exactamente con los del chunk vecino, eliminando gaps.
     /// </summary>
     public class WorldGenerator
     {
         private readonly int _seed;
 
         private const int SeaLevel   = 22;
-        private const int BaseHeight = 22;  // bajado: más terreno bajo el nivel del mar
+        private const int BaseHeight = 22;
         private const int MaxHeight  = 120;
         private const int MinHeight  = 4;
 
-        // Cuevas: un solo Perlin 3D limpio
-        private const int   CaveFadeTop   = 6;    // bloques de fade bajo la superficie
-        private const float CaveThreshold = 0.72f; // umbral alto → cuevas espaciadas, no Swiss cheese
+        private const int   CaveFadeTop   = 6;
+        private const float CaveThreshold = 0.72f;
 
         private readonly int[] _perm = new int[512];
 
@@ -99,9 +82,9 @@ namespace game
             int worldY = chunkY * chunkSize;
             int worldZ = chunkZ * chunkSize;
 
-            int[,]        heights   = new int[chunkSize, chunkSize];
-            float[,,]     weights   = new float[chunkSize, chunkSize, BIOME_COUNT];
-            bool[,]       riverMask = new bool[chunkSize, chunkSize];
+            int[,]    heights   = new int[chunkSize, chunkSize];
+            float[,,] weights   = new float[chunkSize, chunkSize, BIOME_COUNT];
+            bool[,]   riverMask = new bool[chunkSize, chunkSize];
 
             for (int bx = 0; bx < chunkSize; bx++)
             for (int bz = 0; bz < chunkSize; bz++)
@@ -127,7 +110,6 @@ namespace game
                 int terrainHeight = heights[bx, bz];
                 bool isRiver      = riverMask[bx, bz];
 
-                // Bioma dominante para decidir tipo de bloque superficial
                 BiomeType biome = DominantBiome(
                     weights[bx, bz, 0], weights[bx, bz, 1],
                     weights[bx, bz, 2], weights[bx, bz, 3],
@@ -149,56 +131,34 @@ namespace game
         }
 
         // ============================================================
-        //  BIOMAS — PESOS SUAVES (SIN UMBRALES DUROS)
+        //  BIOMAS
         // ============================================================
 
-        private const int BIOME_COUNT = 5; // Plains, Forest, Hills, Mountain, Snow
+        private const int BIOME_COUNT = 5;
 
         private enum BiomeType { Plains, Forest, Hills, Mountains, SnowPeaks }
 
-        /// <summary>
-        /// Calcula pesos bioma normalizados en [0,1] usando temperatura y
-        /// humedad con domain warp. Los pesos son continuos → sin cortes.
-        /// </summary>
         private void SoftBiomeWeights(float wx, float wz,
             out float wPlains, out float wForest, out float wHills,
             out float wMountain, out float wSnow)
         {
-            // Domain warp para bordes orgánicos
             float warpX = OctaveNoise2D(wx, wz, 250f, 2, 0.5f, _seed + 500) * 30f;
             float warpZ = OctaveNoise2D(wx, wz, 250f, 2, 0.5f, _seed + 501) * 30f;
 
             float wx2 = wx + warpX, wz2 = wz + warpZ;
 
-            // Temperatura 0..1  (cálido = alto)
             float temp = (OctaveNoise2D(wx2, wz2, 500f, 3, 0.5f, _seed) + 1f) * 0.5f;
-            // Humedad   0..1  (húmedo = alto)
             float hum  = (OctaveNoise2D(wx2, wz2, 350f, 3, 0.5f, _seed + 1) + 1f) * 0.5f;
-            // Rugosidad 0..1  (montañoso = alto)
             float rug  = (OctaveNoise2D(wx2, wz2, 300f, 3, 0.5f, _seed + 2) + 1f) * 0.5f;
 
-            // ── Pesos crudos con zonas de influencia suaves ───────────
-            // Usando curvas SmoothStep amplias para que la transición
-            // dure ~30–50% del rango → nunca hay corte abrupto.
-
-            // Snow peaks: rugosidad alta + temperatura fría
             wSnow     = SmoothRange(rug, 0.62f, 0.78f) * SmoothRange(1f - temp, 0.45f, 0.65f);
-
-            // Mountains: rugosidad alta, temperatura no extrema
             wMountain = SmoothRange(rug, 0.55f, 0.72f) * (1f - SmoothRange(1f - temp, 0.55f, 0.70f));
-
-            // Hills: rugosidad media
             wHills    = SmoothRange(rug, 0.30f, 0.50f) * SmoothRange(1f - rug, 0.30f, 0.50f);
-
-            // Forest: temperatura cálida + humedad alta, rugosidad baja-media
             wForest   = SmoothRange(temp, 0.45f, 0.65f) * SmoothRange(hum, 0.45f, 0.65f)
                         * (1f - SmoothRange(rug, 0.50f, 0.65f));
-
-            // Plains: lo que queda
             wPlains   = SmoothRange(1f - rug, 0.45f, 0.65f)
                         * (1f - SmoothRange(hum, 0.55f, 0.70f));
 
-            // Normalizar para que sumen 1
             float total = wPlains + wForest + wHills + wMountain + wSnow;
             if (total < 0.001f) { wPlains = 1f; wForest = wHills = wMountain = wSnow = 0f; return; }
             float inv = 1f / total;
@@ -209,9 +169,6 @@ namespace game
             wSnow     *= inv;
         }
 
-        /// <summary>
-        /// SmoothStep entre edge0 y edge1. Devuelve 0..1 suavemente.
-        /// </summary>
         private static float SmoothRange(float x, float edge0, float edge1)
         {
             float t = Math.Clamp((x - edge0) / (edge1 - edge0 + 0.0001f), 0f, 1f);
@@ -229,7 +186,7 @@ namespace game
         }
 
         // ============================================================
-        //  ALTURA DE TERRENO — MEZCLA PONDERADA
+        //  ALTURA DE TERRENO
         // ============================================================
 
         private int GetTerrainHeight(float wx, float wz,
@@ -238,7 +195,6 @@ namespace game
         {
             isRiver = false;
 
-            // Alturas base de cada bioma
             float plainsH   = BaseHeight + 2f
                 + OctaveNoise2D(wx, wz, 120f, 3, 0.40f, _seed + 10) * 8f;
             float forestH   = BaseHeight + 4f
@@ -258,7 +214,6 @@ namespace game
                     + mountainH * wMountain
                     + snowH     * wSnow;
 
-            // Ríos solo en zonas planas/bosques/colinas (peso combinado > 0.5)
             float flatWeight = wPlains + wForest + wHills;
             if (flatWeight > 0.5f)
             {
@@ -290,7 +245,6 @@ namespace game
             riverRaw = (float)Math.Pow(riverRaw, 3f);
             depth01 = riverRaw;
 
-            // Threshold bajo → ríos más anchos (era 0.70)
             const float threshold = 0.55f;
             if (riverRaw < threshold) return 0f;
             return Math.Clamp((riverRaw - threshold) / (1f - threshold), 0f, 1f);
@@ -306,26 +260,16 @@ namespace game
             if (wy > terrainHeight)
                 return wy <= SeaLevel ? BlockType.Water : BlockType.Air;
 
-            // ── Cuevas: Perlin 3D único, puede conectar con la superficie ──
-            // Se excava desde y>4 hasta terrainHeight (inclusive superficie si el noise
-            // es suficientemente alto), salvo los 2 bloques de techo para preservar
-            // la capa de pasto/nieve.
             if (wy > 4 && wy < terrainHeight)
             {
                 float cave = OctaveNoise3D(wx, wy, wz, 40f, 2, 0.5f, _seed + 99);
-                cave = (cave + 1f) * 0.5f; // 0..1
-
-                // Sin fade: el threshold es fijo. Las cuevas pueden llegar hasta
-                // 1 bloque bajo la superficie y crear aberturas naturales.
+                cave = (cave + 1f) * 0.5f;
                 if (cave > CaveThreshold)
                     return BlockType.Air;
             }
 
-            // ── Superficie y capas de suelo ──────────────────────────
             if (wy == terrainHeight)
             {
-                // Arena: en ríos O si el terreno está al nivel del mar o por debajo
-                // (toda la costa queda cubierta hasta el bloque más alto de agua)
                 if (isRiver || terrainHeight <= SeaLevel)
                     return BlockType.Sand;
 
@@ -337,7 +281,6 @@ namespace game
                 };
             }
 
-            // Sub-superficie: arena también bajo el agua (lecho costero)
             if (wy >= terrainHeight - 3)
             {
                 if (terrainHeight <= SeaLevel) return BlockType.Sand;
@@ -458,10 +401,6 @@ namespace game
             new TreeVariant { Trunk = _trunk4, Branches = _branches4, Tips = _tips4 },
         };
 
-        /// <summary>
-        /// Coloca árboles usando los pesos de bioma para la probabilidad.
-        /// Las zonas de transición producen densidades intermedias naturales.
-        /// </summary>
         private void PlaceTrees(
             byte[,,] blocks,
             int worldX, int worldY, int worldZ,
@@ -495,11 +434,9 @@ namespace game
                 if (localX >= chunkSize || localZ >= chunkSize) continue;
                 if (riverMask[localX, localZ]) continue;
 
-                // Probabilidad ponderada por bioma en ese punto
                 float wP = biomeWeights[localX, localZ, 0];
                 float wF = biomeWeights[localX, localZ, 1];
                 float wH = biomeWeights[localX, localZ, 2];
-                // Montañas y nieve no tienen árboles
                 float treeProbability = wP * 0.10f + wF * 0.55f + wH * 0.18f;
 
                 if (chance > treeProbability) continue;
@@ -621,7 +558,6 @@ namespace game
             return blocks;
         }
 
-        // Versión para LOD — necesita terrainHeight para decidir arena costera
         private byte GetSurfaceBlock(BiomeType biome, bool isRiver, int terrainHeight)
         {
             if (isRiver || terrainHeight <= SeaLevel) return BlockType.Sand;
@@ -633,20 +569,42 @@ namespace game
             };
         }
 
+        // ============================================================
+        //  VERY LOW POLY — heightmap con margen (chunkSize+2)x(chunkSize+2)
+        // ============================================================
+
+        /// <summary>
+        /// Genera un heightmap de dimensión (chunkSize+2)x(chunkSize+2).
+        ///
+        /// El margen de 1 bloque en cada borde permite que el VeryLowPolyMesher
+        /// genere vértices de borde que coincidan exactamente con los del chunk
+        /// vecino, eliminando los gaps visuales entre chunks VLP.
+        ///
+        /// Layout del array (igual que HeightmapChunk del proyecto de referencia):
+        ///   - Índice [0, z] / [x, 0] → bloque exterior (borde izquierdo/top)
+        ///   - Índice [1..chunkSize, 1..chunkSize] → bloques del chunk
+        ///   - Índice [chunkSize+1, z] / [x, chunkSize+1] → borde derecho/bottom
+        /// </summary>
         public int[,] GenerateVeryLowPolyChunk(int chunkX, int chunkY, int chunkZ, int chunkSize)
         {
-            int[,] heightMap = new int[chunkSize, chunkSize];
+            int gridSize = chunkSize + 2; // margen de 1 en cada borde
+            int[,] heightMap = new int[gridSize, gridSize];
+
             int worldX = chunkX * chunkSize;
             int worldZ = chunkZ * chunkSize;
 
-            for (int bx = 0; bx < chunkSize; bx++)
-            for (int bz = 0; bz < chunkSize; bz++)
+            for (int bx = 0; bx < gridSize; bx++)
+            for (int bz = 0; bz < gridSize; bz++)
             {
-                float wx = worldX + bx, wz = worldZ + bz;
+                // offset -1 para que bx=0 sea el bloque a la izquierda del chunk
+                float wx = worldX + bx - 1;
+                float wz = worldZ + bz - 1;
+
                 SoftBiomeWeights(wx, wz,
                     out float wP, out float wF, out float wH, out float wM, out float wS);
                 heightMap[bx, bz] = GetTerrainHeight(wx, wz, wP, wF, wH, wM, wS, out _);
             }
+
             return heightMap;
         }
 
@@ -661,10 +619,10 @@ namespace game
             x -= (float)Math.Floor(x);
             y -= (float)Math.Floor(y);
             float u = Fade(x), v = Fade(y);
-            int a  = _perm[X]+Y,     aa = _perm[a],     ab = _perm[a+1];
-            int b  = _perm[X+1]+Y,   ba = _perm[b],     bb = _perm[b+1];
-            return Lerp(Lerp(Grad2(aa, x, y),     Grad2(ba, x-1, y),   u),
-                        Lerp(Grad2(ab, x, y-1),   Grad2(bb, x-1, y-1), u), v);
+            int a  = _perm[X]+Y,   aa = _perm[a],   ab = _perm[a+1];
+            int b  = _perm[X+1]+Y, ba = _perm[b],   bb = _perm[b+1];
+            return Lerp(Lerp(Grad2(aa, x, y),   Grad2(ba, x-1, y),   u),
+                        Lerp(Grad2(ab, x, y-1), Grad2(bb, x-1, y-1), u), v);
         }
 
         private float Perlin3D(float x, float y, float z)
