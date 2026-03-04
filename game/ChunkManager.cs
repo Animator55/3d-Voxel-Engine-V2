@@ -265,7 +265,7 @@ namespace game
                         _lowPolyChunks[cp] = new LowPolyChunk(cp.X, cp.Y, cp.Z, _chunkSize);
                         for (int lvl = LowPolyChunk.LOD_LEVELS - 1; lvl >= 0; lvl--)
                             chunksToGenerate.Add((cp, ChunkType.LowPoly, lvl));
-                        RemoveVlpAt(cp);
+                        // RemoveVlpAt(cp);
                     }
                     else
                     {
@@ -273,6 +273,7 @@ namespace game
                         for (int lvl = LowPolyChunk.LOD_LEVELS - 1; lvl >= 0; lvl--)
                             if (lp.NeedsMesh(lvl))
                                 chunksToGenerate.Add((cp, ChunkType.LowPoly, lvl));
+                        RemoveVlpAt(cp);
                     }
                 }
 
