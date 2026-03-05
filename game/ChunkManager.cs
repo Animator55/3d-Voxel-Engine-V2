@@ -34,7 +34,7 @@ namespace game
 
         private int LodDistXZ => Math.Min(_lodDistance, _loadDistance * 2 + 2);
         private const int LodDistY = 1;
-        private int VlpDistXZ => LodDistXZ + 8;
+        private int VlpDistXZ => LodDistXZ + 4;
         private const int VlpDistY = 1;
 
         private bool _enableVeryLowPoly = true;

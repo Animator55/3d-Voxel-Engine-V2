@@ -5,9 +5,8 @@ namespace game
 {
     /// <summary>
     /// GenerateVeryLowPolyChunk simplificado:
-    /// En vez de llamar SoftBiomeWeights + GetTerrainHeight completos (5+ OctaveNoise),
-    /// usa un único OctaveNoise2D de 2 octavas para estimar la altura.
-    /// Los VLPs están tan lejos que la diferencia visual es imperceptible.
+    /// Reutiliza SoftBiomeWeights (ya barato) y blendea alturas reales con menos octavas.
+    /// Así las montañas aparecen correctamente en el horizonte sin pop-in brusco.
     /// </summary>
     public class WorldGenerator
     {
@@ -166,19 +165,28 @@ namespace game
         }
 
         // ============================================================
-        //  ALTURA SIMPLIFICADA — solo para VLP
+        //  ALTURA VLP — biome-aware, menos octavas que HQ
         //
-        //  Un único OctaveNoise2D de 3 octavas captura la forma general
-        //  del terreno con ~10x menos trabajo que GetTerrainHeight completo.
-        //  Los VLPs están tan lejos que la diferencia visual es nula.
+        //  Reutiliza SoftBiomeWeights (ya barato) y blendea las mismas
+        //  curvas de altura que el sistema real pero con 2-3 octavas en
+        //  vez de 4-6. Resultado: montañas visibles en el horizonte sin
+        //  pop-in, con un coste ~2x respecto al noise único anterior
+        //  pero todavía mucho más ligero que GenerateChunk completo.
         // ============================================================
 
         private int GetTerrainHeightVLP(float wx, float wz)
         {
-            // Una sola llamada de ruido multi-octava da la variación de altura global
-            float n = OctaveNoise2D(wx, wz, 200f, 3, 0.5f, _seed + 77);
-            // n ∈ [-1, 1] aproximadamente
-            float h = BaseHeight + n * 40f;
+            SoftBiomeWeights(wx, wz, out float wP, out float wF, out float wH, out float wM, out float wS);
+
+            float plainsH   = BaseHeight + 2f  + OctaveNoise2D(wx, wz, 120f, 2, 0.45f, _seed + 10) * 8f;
+            float forestH   = BaseHeight + 4f  + OctaveNoise2D(wx, wz, 100f, 2, 0.45f, _seed + 30) * 12f;
+            float hillsH    = BaseHeight + 8f  + OctaveNoise2D(wx, wz,  80f, 3, 0.50f, _seed + 20) * 22f;
+            float mountainH = BaseHeight + 18f + OctaveNoise2D(wx, wz,  60f, 3, 0.55f, _seed + 40) * 38f
+                                               + RidgeNoise2D (wx, wz,  50f, 2,         _seed + 41) * 28f;
+            float snowH     = BaseHeight + 38f + OctaveNoise2D(wx, wz,  50f, 3, 0.60f, _seed + 50) * 42f
+                                               + RidgeNoise2D (wx, wz,  40f, 3,         _seed + 51) * 32f;
+
+            float h = plainsH*wP + forestH*wF + hillsH*wH + mountainH*wM + snowH*wS;
             return (int)Math.Clamp(h, MinHeight, MaxHeight);
         }
 
@@ -217,7 +225,7 @@ namespace game
                 if (isRiver || terrainH <= SeaLevel) return BlockType.Sand;
                 return biome switch { BiomeType.SnowPeaks=>BlockType.Snow, BiomeType.Mountains=>BlockType.Stone, _=>BlockType.Grass };
             }
-            if (wy >= terrainH-3) return terrainH <= SeaLevel ? BlockType.Sand : BlockType.Dirt;
+            if (wy >= terrainH-2) return terrainH <= SeaLevel ? BlockType.Sand : BlockType.Dirt;
             return BlockType.Stone;
         }
 
@@ -345,8 +353,6 @@ namespace game
 
         // ============================================================
         //  VERY LOW POLY — heightmap (chunkSize+2)x(chunkSize+2)
-        //  Usa GetTerrainHeightVLP: 1 OctaveNoise de 3 octavas por columna,
-        //  ~10x más rápido que la versión completa. Imperceptible a esa distancia.
         // ============================================================
 
         public int[,] GenerateVeryLowPolyChunk(int chunkX, int chunkY, int chunkZ, int chunkSize)

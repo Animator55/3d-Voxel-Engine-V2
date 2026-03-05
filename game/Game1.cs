@@ -98,7 +98,7 @@ namespace game
                 FogEnabled         = true,
                 FogStart           = LoadDistance * 2 * 24f,
                 FogColor           = new Vector3(135f / 255f, 206f / 255f, 235f / 255f),
-                FogEnd             = LoadDistance * 4 * 24f,
+                FogEnd             = LoadDistance * 2 * 36f,
             };
             _effect.DirectionalLight0.Enabled      = true;
             _effect.DirectionalLight0.Direction    = Vector3.Normalize(new Vector3(1, -1, 0.5f));
@@ -205,8 +205,6 @@ namespace game
             Vector2 sz = _debugFont.MeasureString(fpsStr);
             DrawTS(fpsStr, new Vector2(vw - sz.X - 8, 8), fpsCol);
             DrawTS("[F3] debug", new Vector2(vw - 72, 8 + LineH), CLabel);
-
-            DrawCrosshair();
         }
 
         // ============================================================
@@ -352,7 +350,7 @@ namespace game
         }
 
         private static Color FpsColor(float fps)
-            => fps >= 55 ? CGood : fps >= 30 ? CWarn : CBad;
+            => fps >= 50 ? CGood : fps >= 30 ? CWarn : CBad;
 
         private static string CardinalFacing(Vector3 fwd)
         {
