@@ -4,9 +4,8 @@ using System.Collections.Generic;
 namespace game
 {
     /// <summary>
-    /// GenerateVeryLowPolyChunk simplificado:
-    /// Reutiliza SoftBiomeWeights (ya barato) y blendea alturas reales con menos octavas.
-    /// Así las montañas aparecen correctamente en el horizonte sin pop-in brusco.
+    /// WorldGenerator con 6 biomas:
+    /// Bosque, Llanuras, Taiga, Desierto, Montañas, Océano
     /// </summary>
     public class WorldGenerator
     {
@@ -15,7 +14,7 @@ namespace game
         private const int SeaLevel   = 22;
         private const int BaseHeight = 22;
         private const int MaxHeight  = 120;
-        private const int MinHeight  = 4;
+        private const int MinHeight  = 2;
 
         private const float CaveThreshold = 0.72f;
 
@@ -68,7 +67,7 @@ namespace game
         public byte[,,] GenerateChunk(int chunkX, int chunkY, int chunkZ, int chunkSize)
         {
             byte[,,] blocks = new byte[chunkSize, chunkSize, chunkSize];
-            int worldX = chunkX*chunkSize, worldY = chunkY*chunkSize, worldZ = chunkZ*chunkSize;
+            int worldX = chunkX * chunkSize, worldY = chunkY * chunkSize, worldZ = chunkZ * chunkSize;
 
             int[,]    heights   = new int[chunkSize, chunkSize];
             float[,,] weights   = new float[chunkSize, chunkSize, BIOME_COUNT];
@@ -77,20 +76,26 @@ namespace game
             for (int bx = 0; bx < chunkSize; bx++)
             for (int bz = 0; bz < chunkSize; bz++)
             {
-                float wx = worldX+bx, wz = worldZ+bz;
-                SoftBiomeWeights(wx, wz, out float wP, out float wF, out float wH, out float wM, out float wS);
-                weights[bx,bz,0]=wP; weights[bx,bz,1]=wF; weights[bx,bz,2]=wH; weights[bx,bz,3]=wM; weights[bx,bz,4]=wS;
-                heights[bx,bz]   = GetTerrainHeight(wx, wz, wP, wF, wH, wM, wS, out bool ir);
-                riverMask[bx,bz] = ir;
+                float wx = worldX + bx, wz = worldZ + bz;
+                SoftBiomeWeights(wx, wz,
+                    out float wPl, out float wFo, out float wTa,
+                    out float wDe, out float wMo, out float wOc);
+                weights[bx, bz, 0] = wPl; weights[bx, bz, 1] = wFo;
+                weights[bx, bz, 2] = wTa; weights[bx, bz, 3] = wDe;
+                weights[bx, bz, 4] = wMo; weights[bx, bz, 5] = wOc;
+                heights[bx, bz]    = GetTerrainHeight(wx, wz, wPl, wFo, wTa, wDe, wMo, wOc, out bool ir);
+                riverMask[bx, bz]  = ir;
             }
 
             for (int bx = 0; bx < chunkSize; bx++)
             for (int bz = 0; bz < chunkSize; bz++)
             {
-                int h = heights[bx,bz]; bool ir = riverMask[bx,bz];
-                BiomeType biome = DominantBiome(weights[bx,bz,0],weights[bx,bz,1],weights[bx,bz,2],weights[bx,bz,3],weights[bx,bz,4]);
+                int h = heights[bx, bz]; bool ir = riverMask[bx, bz];
+                BiomeType biome = DominantBiome(
+                    weights[bx,bz,0], weights[bx,bz,1], weights[bx,bz,2],
+                    weights[bx,bz,3], weights[bx,bz,4], weights[bx,bz,5]);
                 for (int by = 0; by < chunkSize; by++)
-                    blocks[bx,by,bz] = GetBlockAt(worldX+bx, worldY+by, worldZ+bz, h, biome, ir);
+                    blocks[bx, by, bz] = GetBlockAt(worldX+bx, worldY+by, worldZ+bz, h, biome, ir);
             }
 
             PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize, heights, weights, riverMask, 0);
@@ -98,95 +103,167 @@ namespace game
         }
 
         // ============================================================
-        //  BIOMAS
+        //  BIOMAS  (6 tipos)
         // ============================================================
 
-        private const int BIOME_COUNT = 5;
-        private enum BiomeType { Plains, Forest, Hills, Mountains, SnowPeaks }
+        private const int BIOME_COUNT = 6;
 
+        private enum BiomeType { Plains, Forest, Taiga, Desert, Mountains, Ocean }
+
+        /// <summary>
+        /// Calcula pesos suaves para los 6 biomas según temperatura, humedad y rugosidad.
+        ///
+        ///  temp  alta  = caliente   → Desierto
+        ///  temp  baja  = frío       → Taiga / Montañas
+        ///  hum   alta                → Bosque / Taiga
+        ///  hum   baja                → Llanuras / Desierto
+        ///  rug   alta                → Montañas
+        ///  rug   baja                → Llanuras / Océano (continentalidad baja)
+        ///  continental baja          → Océano
+        /// </summary>
         private void SoftBiomeWeights(float wx, float wz,
-            out float wPlains, out float wForest, out float wHills, out float wMountain, out float wSnow)
+            out float wPlains, out float wForest, out float wTaiga,
+            out float wDesert, out float wMountains, out float wOcean)
         {
-            float warpX = OctaveNoise2D(wx, wz, 250f, 2, 0.5f, _seed+500) * 30f;
-            float warpZ = OctaveNoise2D(wx, wz, 250f, 2, 0.5f, _seed+501) * 30f;
-            float wx2 = wx+warpX, wz2 = wz+warpZ;
+            // Domain warp leve
+            float wpX = OctaveNoise2D(wx, wz, 250f, 2, 0.5f, _seed + 500) * 30f;
+            float wpZ = OctaveNoise2D(wx, wz, 250f, 2, 0.5f, _seed + 501) * 30f;
+            float wx2 = wx + wpX, wz2 = wz + wpZ;
 
-            float temp = (OctaveNoise2D(wx2, wz2, 500f, 3, 0.5f, _seed)   + 1f) * 0.5f;
-            float hum  = (OctaveNoise2D(wx2, wz2, 350f, 3, 0.5f, _seed+1) + 1f) * 0.5f;
-            float rug  = (OctaveNoise2D(wx2, wz2, 300f, 3, 0.5f, _seed+2) + 1f) * 0.5f;
+            // Parámetros climáticos [0,1]
+            float temp = (OctaveNoise2D(wx2, wz2, 600f, 3, 0.5f, _seed)     + 1f) * 0.5f;
+            float hum  = (OctaveNoise2D(wx2, wz2, 400f, 3, 0.5f, _seed + 1) + 1f) * 0.5f;
+            float rug  = (OctaveNoise2D(wx2, wz2, 300f, 3, 0.5f, _seed + 2) + 1f) * 0.5f;
 
-            wSnow     = SmoothRange(rug, 0.62f, 0.78f) * SmoothRange(1f-temp, 0.45f, 0.65f);
-            wMountain = SmoothRange(rug, 0.55f, 0.72f) * (1f - SmoothRange(1f-temp, 0.55f, 0.70f));
-            wHills    = SmoothRange(rug, 0.30f, 0.50f) * SmoothRange(1f-rug, 0.30f, 0.50f);
-            wForest   = SmoothRange(temp, 0.45f, 0.65f) * SmoothRange(hum, 0.45f, 0.65f) * (1f - SmoothRange(rug, 0.50f, 0.65f));
-            wPlains   = SmoothRange(1f-rug, 0.45f, 0.65f) * (1f - SmoothRange(hum, 0.55f, 0.70f));
+            // Continentalidad: valores bajos → océano (escala grande para grandes masas de agua)
+            float cont = (OctaveNoise2D(wx2, wz2, 900f, 2, 0.5f, _seed + 3) + 1f) * 0.7f;
 
-            float total = wPlains+wForest+wHills+wMountain+wSnow;
-            if (total < 0.001f) { wPlains=1f; wForest=wHills=wMountain=wSnow=0f; return; }
-            float inv = 1f/total; wPlains*=inv; wForest*=inv; wHills*=inv; wMountain*=inv; wSnow*=inv;
+            // --- Océano: continentalidad baja -----------------------------------------
+            wOcean = SmoothRange(1f - cont, 0.45f, 0.65f);
+
+            float land = 1f - wOcean; // peso tierra disponible
+
+            // --- Montañas: rugosidad alta ---------------------------------------------
+            wMountains = SmoothRange(rug, 0.58f, 0.75f) * land;
+
+            // Factor "no-montaña" para repartir el resto
+            float noMtn = 1f - SmoothRange(rug, 0.52f, 0.68f);
+
+            // --- Desierto: temp alta, hum baja ----------------------------------------
+            wDesert = SmoothRange(temp, 0.62f, 0.80f) * SmoothRange(1f - hum, 0.55f, 0.75f) * noMtn * land;
+
+            // --- Taiga: temp baja, hum media-alta -------------------------------------
+            wTaiga  = SmoothRange(1f - temp, 0.50f, 0.70f) * SmoothRange(hum, 0.40f, 0.60f) * noMtn * land;
+
+            // --- Bosque: temp media, hum alta -----------------------------------------
+            wForest = SmoothRange(temp, 0.38f, 0.58f) * SmoothRange(hum, 0.50f, 0.70f) * noMtn * land;
+
+            // --- Llanuras: lo que queda en tierra -------------------------------------
+            float usedLand = wMountains + wDesert + wTaiga + wForest;
+            wPlains = Math.Max(0f, land - usedLand);
+
+            // Normalizar
+            float total = wPlains + wForest + wTaiga + wDesert + wMountains + wOcean;
+            if (total < 0.001f) { wPlains = 1f; wForest = wTaiga = wDesert = wMountains = wOcean = 0f; return; }
+            float inv = 1f / total;
+            wPlains    *= inv; wForest *= inv; wTaiga    *= inv;
+            wDesert    *= inv; wMountains *= inv; wOcean *= inv;
         }
 
         private static float SmoothRange(float x, float edge0, float edge1)
         {
-            float t = Math.Clamp((x-edge0)/(edge1-edge0+0.0001f), 0f, 1f);
-            return t*t*(3f-2f*t);
+            float t = Math.Clamp((x - edge0) / (edge1 - edge0 + 0.0001f), 0f, 1f);
+            return t * t * (3f - 2f * t);
         }
 
-        private static BiomeType DominantBiome(float wP, float wF, float wH, float wM, float wS)
+        private static BiomeType DominantBiome(float wPl, float wFo, float wTa, float wDe, float wMo, float wOc)
         {
-            if (wS>=wP&&wS>=wF&&wS>=wH&&wS>=wM) return BiomeType.SnowPeaks;
-            if (wM>=wP&&wM>=wF&&wM>=wH)          return BiomeType.Mountains;
-            if (wH>=wP&&wH>=wF)                  return BiomeType.Hills;
-            if (wF>=wP)                           return BiomeType.Forest;
-            return BiomeType.Plains;
+            BiomeType best = BiomeType.Plains;
+            float bestW = wPl;
+            if (wFo > bestW) { best = BiomeType.Forest;    bestW = wFo; }
+            if (wTa > bestW) { best = BiomeType.Taiga;     bestW = wTa; }
+            if (wDe > bestW) { best = BiomeType.Desert;    bestW = wDe; }
+            if (wMo > bestW) { best = BiomeType.Mountains; bestW = wMo; }
+            if (wOc > bestW) { best = BiomeType.Ocean;               }
+            return best;
         }
 
         // ============================================================
-        //  ALTURA DE TERRENO (completa, para HQ y LP)
+        //  ALTURA DE TERRENO (HQ)
         // ============================================================
 
         private int GetTerrainHeight(float wx, float wz,
-            float wPlains, float wForest, float wHills, float wMountain, float wSnow, out bool isRiver)
+            float wPlains, float wForest, float wTaiga, float wDesert, float wMountains, float wOcean,
+            out bool isRiver)
         {
             isRiver = false;
-            float plainsH   = BaseHeight + 2f  + OctaveNoise2D(wx, wz, 120f, 3, 0.40f, _seed+10) * 8f;
-            float forestH   = BaseHeight + 4f  + OctaveNoise2D(wx, wz, 100f, 4, 0.45f, _seed+30) * 12f;
-            float hillsH    = BaseHeight + 8f  + OctaveNoise2D(wx, wz, 80f,  4, 0.50f, _seed+20) * 22f;
-            float mountainH = BaseHeight + 18f + OctaveNoise2D(wx, wz, 60f,  6, 0.55f, _seed+40) * 38f + RidgeNoise2D(wx, wz, 50f, 4, _seed+41) * 28f;
-            float snowH     = BaseHeight + 38f + OctaveNoise2D(wx, wz, 50f,  6, 0.60f, _seed+50) * 42f + RidgeNoise2D(wx, wz, 40f, 5, _seed+51) * 32f;
-            float h = plainsH*wPlains + forestH*wForest + hillsH*wHills + mountainH*wMountain + snowH*wSnow;
 
-            if (wPlains+wForest+wHills > 0.5f)
+            // Cada bioma tiene su curva de altura característica
+            float plainsH    = BaseHeight + 2f
+                             + OctaveNoise2D(wx, wz, 120f, 3, 0.40f, _seed + 10) * 8f;
+
+            float forestH    = BaseHeight + 4f
+                             + OctaveNoise2D(wx, wz, 100f, 4, 0.45f, _seed + 30) * 12f;
+
+            float taigaH     = BaseHeight + 6f
+                             + OctaveNoise2D(wx, wz,  90f, 4, 0.45f, _seed + 60) * 16f;
+
+            // Desierto: dunas con ridge suave, sin valles pronunciados
+            float desertH    = BaseHeight + 3f
+                             + OctaveNoise2D(wx, wz, 150f, 3, 0.35f, _seed + 70) * 10f
+                             + RidgeNoise2D(wx, wz, 120f, 2, _seed + 71) * 6f;
+
+            float mountainH  = BaseHeight + 18f
+                             + OctaveNoise2D(wx, wz,  60f, 6, 0.55f, _seed + 40) * 38f
+                             + RidgeNoise2D(wx, wz,  50f, 4,         _seed + 41) * 28f;
+
+            // Océano: por debajo del nivel del mar
+            float oceanH     = SeaLevel - 8f
+                             + OctaveNoise2D(wx, wz, 200f, 2, 0.40f, _seed + 80) * 5f;
+
+            float h = plainsH    * wPlains
+                    + forestH    * wForest
+                    + taigaH     * wTaiga
+                    + desertH    * wDesert
+                    + mountainH  * wMountains
+                    + oceanH     * wOcean;
+
+            // Ríos solo en zonas de tierra (no desierto ni océano)
+            float landWeight = wPlains + wForest + wTaiga;
+            if (landWeight > 0.4f)
             {
                 float ri = GetRiverInfluence(wx, wz, out _);
-                if (ri > 0f) { h = h*(1f-ri)+(SeaLevel-3f)*ri; if (ri > 0.2f) isRiver = true; }
+                if (ri > 0f)
+                {
+                    h = h * (1f - ri) + (SeaLevel - 3f) * ri;
+                    if (ri > 0.2f) isRiver = true;
+                }
             }
+
             return (int)Math.Clamp(h, MinHeight, MaxHeight);
         }
 
         // ============================================================
-        //  ALTURA VLP — biome-aware, menos octavas que HQ
-        //
-        //  Reutiliza SoftBiomeWeights (ya barato) y blendea las mismas
-        //  curvas de altura que el sistema real pero con 2-3 octavas en
-        //  vez de 4-6. Resultado: montañas visibles en el horizonte sin
-        //  pop-in, con un coste ~2x respecto al noise único anterior
-        //  pero todavía mucho más ligero que GenerateChunk completo.
+        //  ALTURA VLP (menos octavas, misma lógica de biomas)
         // ============================================================
 
         private int GetTerrainHeightVLP(float wx, float wz)
         {
-            SoftBiomeWeights(wx, wz, out float wP, out float wF, out float wH, out float wM, out float wS);
+            SoftBiomeWeights(wx, wz,
+                out float wPl, out float wFo, out float wTa,
+                out float wDe, out float wMo, out float wOc);
 
-            float plainsH   = BaseHeight + 2f  + OctaveNoise2D(wx, wz, 120f, 2, 0.45f, _seed + 10) * 8f;
+            float plainsH   = BaseHeight + 2f  + OctaveNoise2D(wx, wz, 120f, 2, 0.40f, _seed + 10) * 8f;
             float forestH   = BaseHeight + 4f  + OctaveNoise2D(wx, wz, 100f, 2, 0.45f, _seed + 30) * 12f;
-            float hillsH    = BaseHeight + 8f  + OctaveNoise2D(wx, wz,  80f, 3, 0.50f, _seed + 20) * 22f;
+            float taigaH    = BaseHeight + 6f  + OctaveNoise2D(wx, wz,  90f, 2, 0.45f, _seed + 60) * 16f;
+            float desertH   = BaseHeight + 3f  + OctaveNoise2D(wx, wz, 150f, 2, 0.35f, _seed + 70) * 10f
+                                               + RidgeNoise2D(wx, wz, 120f, 2,          _seed + 71) * 6f;
             float mountainH = BaseHeight + 18f + OctaveNoise2D(wx, wz,  60f, 3, 0.55f, _seed + 40) * 38f
-                                               + RidgeNoise2D (wx, wz,  50f, 2,         _seed + 41) * 28f;
-            float snowH     = BaseHeight + 38f + OctaveNoise2D(wx, wz,  50f, 3, 0.60f, _seed + 50) * 42f
-                                               + RidgeNoise2D (wx, wz,  40f, 3,         _seed + 51) * 32f;
+                                               + RidgeNoise2D(wx, wz,  50f, 2,          _seed + 41) * 28f;
+            float oceanH    = SeaLevel - 8f   + OctaveNoise2D(wx, wz, 200f, 2, 0.40f, _seed + 80) * 5f;
 
-            float h = plainsH*wP + forestH*wF + hillsH*wH + mountainH*wM + snowH*wS;
+            float h = plainsH * wPl + forestH * wFo + taigaH * wTa
+                    + desertH * wDe + mountainH * wMo + oceanH * wOc;
             return (int)Math.Clamp(h, MinHeight, MaxHeight);
         }
 
@@ -196,16 +273,16 @@ namespace game
 
         private float GetRiverInfluence(float wx, float wz, out float depth01)
         {
-            float rwX = OctaveNoise2D(wx, wz, 150f, 2, 0.5f, _seed+600) * 30f;
-            float rwZ = OctaveNoise2D(wx, wz, 150f, 2, 0.5f, _seed+601) * 30f;
-            float n = OctaveNoise2D(wx+rwX, wz+rwZ, 300f, 4, 0.5f, _seed+700);
-            n = (n+1f)*0.5f;
-            float raw = 1f - Math.Abs(n*2f-1f);
+            float rwX = OctaveNoise2D(wx, wz, 150f, 2, 0.5f, _seed + 600) * 30f;
+            float rwZ = OctaveNoise2D(wx, wz, 150f, 2, 0.5f, _seed + 601) * 30f;
+            float n   = OctaveNoise2D(wx + rwX, wz + rwZ, 300f, 4, 0.5f, _seed + 700);
+            n = (n + 1f) * 0.5f;
+            float raw = 1f - Math.Abs(n * 2f - 1f);
             raw = (float)Math.Pow(raw, 3f);
             depth01 = raw;
             const float threshold = 0.55f;
             if (raw < threshold) return 0f;
-            return Math.Clamp((raw-threshold)/(1f-threshold), 0f, 1f);
+            return Math.Clamp((raw - threshold) / (1f - threshold), 0f, 1f);
         }
 
         // ============================================================
@@ -214,19 +291,50 @@ namespace game
 
         private byte GetBlockAt(int wx, int wy, int wz, int terrainH, BiomeType biome, bool isRiver)
         {
-            if (wy > terrainH) return wy <= SeaLevel ? BlockType.Water : BlockType.Air;
-            if (wy > 4 && wy < terrainH)
+            // Aire o agua sobre el terreno
+            if (wy > terrainH)
+                return wy <= SeaLevel ? BlockType.Water : BlockType.Air;
+
+            // Cuevas (no en el fondo del océano, no en la capa más baja)
+            if (wy > 4 && wy < terrainH - 1)
             {
-                float cave = (OctaveNoise3D(wx, wy, wz, 40f, 2, 0.5f, _seed+99) + 1f) * 0.5f;
+                float cave = (OctaveNoise3D(wx, wy, wz, 40f, 2, 0.5f, _seed + 99) + 1f) * 0.5f;
                 if (cave > CaveThreshold) return BlockType.Air;
             }
+
+            // Superficie
             if (wy == terrainH)
+                return GetSurfaceBlock(biome, isRiver, terrainH);
+
+            // Sub-superficie (1-3 bloques bajo la superficie)
+            if (wy >= terrainH - 3)
             {
-                if (isRiver || terrainH <= SeaLevel) return BlockType.Sand;
-                return biome switch { BiomeType.SnowPeaks=>BlockType.Snow, BiomeType.Mountains=>BlockType.Stone, _=>BlockType.Grass };
+                return biome switch
+                {
+                    BiomeType.Desert => BlockType.Sand,   // Desierto: arena profunda
+                    BiomeType.Ocean  => BlockType.Stone, // Fondo oceánico: grava + arena
+                    _ => terrainH <= SeaLevel ? BlockType.Sand : BlockType.Dirt
+                };
             }
-            if (wy >= terrainH-2) return terrainH <= SeaLevel ? BlockType.Sand : BlockType.Dirt;
+
+            // Roca base
             return BlockType.Stone;
+        }
+
+        private byte GetSurfaceBlock(BiomeType biome, bool isRiver, int h)
+        {
+            if (isRiver) return BlockType.Sand;
+
+            return biome switch
+            {
+                BiomeType.Ocean     => h <= SeaLevel - 3 ? BlockType.Stone : BlockType.Sand,
+                BiomeType.Desert    => BlockType.Sand,
+                BiomeType.Mountains => h > SeaLevel + 50 ? BlockType.Snow : BlockType.Stone,
+                BiomeType.Taiga     => h > SeaLevel + 30 ? BlockType.Snow : BlockType.Grass,
+                BiomeType.Plains    => h <= SeaLevel ? BlockType.Sand : BlockType.Grass,
+                BiomeType.Forest    => h <= SeaLevel ? BlockType.Sand : BlockType.Grass,
+                _                   => BlockType.Grass
+            };
         }
 
         // ============================================================
@@ -267,22 +375,32 @@ namespace game
         private void PlaceTrees(byte[,,] blocks, int worldX, int worldY, int worldZ, int chunkSize,
             int[,] heights, float[,,] biomeWeights, bool[,] riverMask, int simplificationLevel = 0)
         {
-            int gridSize = simplificationLevel switch { 0=>5, 1=>10, _=>20 };
-            for (int gx = 0; gx < chunkSize/gridSize+1; gx++)
-            for (int gz = 0; gz < chunkSize/gridSize+1; gz++)
+            int gridSize = simplificationLevel switch { 0 => 5, 1 => 10, _ => 20 };
+            for (int gx = 0; gx < chunkSize / gridSize + 1; gx++)
+            for (int gz = 0; gz < chunkSize / gridSize + 1; gz++)
             {
-                int cwx=worldX+gx*gridSize, cwz=worldZ+gz*gridSize;
-                float chance = Hash2Df(cwx, cwz, _seed+200);
-                int offX=(int)(Hash2Df(cwx,cwz,_seed+201)*(gridSize-1));
-                int offZ=(int)(Hash2Df(cwx,cwz,_seed+202)*(gridSize-1));
-                int lx=gx*gridSize+offX, lz=gz*gridSize+offZ;
-                if (lx>=chunkSize||lz>=chunkSize) continue;
-                if (riverMask[lx,lz]) continue;
-                float prob = biomeWeights[lx,lz,0]*0.10f+biomeWeights[lx,lz,1]*0.55f+biomeWeights[lx,lz,2]*0.18f;
-                if (chance>prob) continue;
-                int ly=heights[lx,lz]+1-worldY;
-                int vi=Math.Clamp((int)(Hash2Df(cwx+5,cwz+5,_seed+210)*_treeVariants.Length),0,_treeVariants.Length-1);
-                PlaceTreeVariant(blocks,lx,ly,lz,vi,chunkSize);
+                int cwx = worldX + gx * gridSize, cwz = worldZ + gz * gridSize;
+                float chance = Hash2Df(cwx, cwz, _seed + 200);
+                int offX = (int)(Hash2Df(cwx, cwz, _seed + 201) * (gridSize - 1));
+                int offZ = (int)(Hash2Df(cwx, cwz, _seed + 202) * (gridSize - 1));
+                int lx = gx * gridSize + offX, lz = gz * gridSize + offZ;
+                if (lx >= chunkSize || lz >= chunkSize) continue;
+                if (riverMask[lx, lz]) continue;
+                if (heights[lx, lz] <= SeaLevel) continue; // No árboles bajo el agua
+
+                // Probabilidad de árbol por bioma
+                // Plains:0, Forest:1, Taiga:2, Desert:3, Mountains:4, Ocean:5
+                float prob = biomeWeights[lx,lz,0] * 0.08f   // Llanuras: pocos árboles
+                           + biomeWeights[lx,lz,1] * 0.60f   // Bosque: muchos
+                           + biomeWeights[lx,lz,2] * 0.35f   // Taiga: bastantes
+                           + biomeWeights[lx,lz,3] * 0.00f   // Desierto: sin árboles
+                           + biomeWeights[lx,lz,4] * 0.05f   // Montañas: muy pocos
+                           + biomeWeights[lx,lz,5] * 0.00f;  // Océano: sin árboles
+                if (chance > prob) continue;
+
+                int ly = heights[lx, lz] + 1 - worldY;
+                int vi = Math.Clamp((int)(Hash2Df(cwx+5, cwz+5, _seed+210) * _treeVariants.Length), 0, _treeVariants.Length-1);
+                PlaceTreeVariant(blocks, lx, ly, lz, vi, chunkSize);
             }
         }
 
@@ -302,7 +420,7 @@ namespace game
         }
 
         private static bool InBounds(int x, int y, int z, int size) =>
-            x>=0&&x<size&&y>=0&&y<size&&z>=0&&z<size;
+            x >= 0 && x < size && y >= 0 && y < size && z >= 0 && z < size;
 
         // ============================================================
         //  LOD SIMPLIFICADO
@@ -311,7 +429,7 @@ namespace game
         public byte[,,] GenerateLowPolyChunk(int chunkX, int chunkY, int chunkZ, int chunkSize, int simplificationLevel = 0)
         {
             byte[,,] blocks = new byte[chunkSize, chunkSize, chunkSize];
-            int worldX=chunkX*chunkSize, worldY=chunkY*chunkSize, worldZ=chunkZ*chunkSize;
+            int worldX = chunkX * chunkSize, worldY = chunkY * chunkSize, worldZ = chunkZ * chunkSize;
 
             int[,]    heights   = new int[chunkSize, chunkSize];
             float[,,] weights   = new float[chunkSize, chunkSize, BIOME_COUNT];
@@ -320,46 +438,45 @@ namespace game
             for (int bx = 0; bx < chunkSize; bx++)
             for (int bz = 0; bz < chunkSize; bz++)
             {
-                float wx=worldX+bx, wz=worldZ+bz;
-                SoftBiomeWeights(wx,wz,out float wP,out float wF,out float wH,out float wM,out float wS);
-                weights[bx,bz,0]=wP;weights[bx,bz,1]=wF;weights[bx,bz,2]=wH;weights[bx,bz,3]=wM;weights[bx,bz,4]=wS;
-                heights[bx,bz]=GetTerrainHeight(wx,wz,wP,wF,wH,wM,wS,out bool ir);
-                riverMask[bx,bz]=ir;
+                float wx = worldX + bx, wz = worldZ + bz;
+                SoftBiomeWeights(wx, wz,
+                    out float wPl, out float wFo, out float wTa,
+                    out float wDe, out float wMo, out float wOc);
+                weights[bx,bz,0]=wPl; weights[bx,bz,1]=wFo; weights[bx,bz,2]=wTa;
+                weights[bx,bz,3]=wDe; weights[bx,bz,4]=wMo; weights[bx,bz,5]=wOc;
+                heights[bx,bz] = GetTerrainHeight(wx, wz, wPl, wFo, wTa, wDe, wMo, wOc, out bool ir);
+                riverMask[bx,bz] = ir;
             }
 
-            int sc = simplificationLevel switch { 0=>20, 1=>10, _=>5 };
+            int sc = simplificationLevel switch { 0 => 20, 1 => 10, _ => 5 };
             for (int bx = 0; bx < chunkSize; bx++)
             for (int bz = 0; bz < chunkSize; bz++)
             {
-                int h=heights[bx,bz]; bool ir=riverMask[bx,bz];
-                BiomeType biome=DominantBiome(weights[bx,bz,0],weights[bx,bz,1],weights[bx,bz,2],weights[bx,bz,3],weights[bx,bz,4]);
+                int h = heights[bx,bz]; bool ir = riverMask[bx,bz];
+                BiomeType biome = DominantBiome(
+                    weights[bx,bz,0], weights[bx,bz,1], weights[bx,bz,2],
+                    weights[bx,bz,3], weights[bx,bz,4], weights[bx,bz,5]);
                 for (int by = 0; by < chunkSize; by++)
                 {
-                    int wy=worldY+by;
-                    if      (wy>=h-sc&&wy<=h)              blocks[bx,by,bz]=wy==h?GetSurfaceBlock(biome,ir,h):BlockType.Dirt;
-                    else if (wy>=SeaLevel&&wy<h-sc)        blocks[bx,by,bz]=BlockType.Stone;
-                    else if (wy<=SeaLevel&&wy>h)           blocks[bx,by,bz]=BlockType.Water;
+                    int wy = worldY + by;
+                    if      (wy >= h - sc && wy <= h)       blocks[bx,by,bz] = wy == h ? GetSurfaceBlock(biome, ir, h) : BlockType.Dirt;
+                    else if (wy >= SeaLevel && wy < h - sc) blocks[bx,by,bz] = BlockType.Stone;
+                    else if (wy <= SeaLevel && wy > h)      blocks[bx,by,bz] = BlockType.Water;
                 }
             }
-            PlaceTrees(blocks,worldX,worldY,worldZ,chunkSize,heights,weights,riverMask,simplificationLevel);
+            PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize, heights, weights, riverMask, simplificationLevel);
             return blocks;
         }
 
-        private byte GetSurfaceBlock(BiomeType biome, bool isRiver, int h)
-        {
-            if (isRiver||h<=SeaLevel) return BlockType.Sand;
-            return biome switch { BiomeType.SnowPeaks=>BlockType.Snow, BiomeType.Mountains=>BlockType.Stone, _=>BlockType.Grass };
-        }
-
         // ============================================================
-        //  VERY LOW POLY — heightmap (chunkSize+2)x(chunkSize+2)
+        //  VERY LOW POLY — heightmap (chunkSize+2)×(chunkSize+2)
         // ============================================================
 
         public int[,] GenerateVeryLowPolyChunk(int chunkX, int chunkY, int chunkZ, int chunkSize)
         {
             int gridSize = chunkSize + 2;
             int[,] heightMap = new int[gridSize, gridSize];
-            int worldX = chunkX*chunkSize, worldZ = chunkZ*chunkSize;
+            int worldX = chunkX * chunkSize, worldZ = chunkZ * chunkSize;
 
             for (int bx = 0; bx < gridSize; bx++)
             for (int bz = 0; bz < gridSize; bz++)
@@ -368,7 +485,6 @@ namespace game
                 float wz = worldZ + bz - 1;
                 heightMap[bx, bz] = GetTerrainHeightVLP(wx, wz);
             }
-
             return heightMap;
         }
 

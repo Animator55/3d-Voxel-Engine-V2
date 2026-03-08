@@ -15,8 +15,12 @@ namespace game
         private Camera _camera;
         private ChunkManager _chunkManager;
 
-        private const int ChunkSize = 32;
-        private const int LoadDistance = 6;
+        // Configuración inicial (puede cambiar en runtime)
+        private int _loadDistance = 11;
+
+        // ── Pausa ────────────────────────────────────────────────────
+        private PauseMenu _pauseMenu;
+        private bool _lastEscape = false;
 
         // ── UI ──────────────────────────────────────────────────────
         private SpriteBatch _spriteBatch;
@@ -47,10 +51,10 @@ namespace game
         private static readonly Color CBad    = new Color(255, 80,  80);
 
         // ── Layout ───────────────────────────────────────────────────
-        private const int PadX     = 6;
-        private const int PadY     = 6;
-        private const int LineH    = 14;
-        private const int ColW     = 230;
+        private const int PadX  = 6;
+        private const int PadY  = 6;
+        private const int LineH = 14;
+        private const int ColW  = 230;
 
         public Game1()
         {
@@ -74,11 +78,11 @@ namespace game
                 startPosition:  new Vector3(0, 70, 0),
                 aspectRatio:    aspect,
                 graphicsDevice: GraphicsDevice,
-                fov:            MathHelper.PiOver2 - 0.1f,
+                fov:            MathHelper.ToRadians(80f),
                 nearPlane:      0.1f,
-                farPlane:       10000f);
+                farPlane:       100000f);
 
-            _chunkManager = new ChunkManager(GraphicsDevice, ChunkSize, LoadDistance);
+            _chunkManager = new ChunkManager(GraphicsDevice, chunkSize: 32, loadDistance: _loadDistance);
 
             _solidState     = new RasterizerState { CullMode = CullMode.CullClockwiseFace, FillMode = FillMode.Solid };
             _wireframeState = new RasterizerState { CullMode = CullMode.CullClockwiseFace, FillMode = FillMode.WireFrame };
@@ -95,10 +99,10 @@ namespace game
                 VertexColorEnabled = true,
                 LightingEnabled    = true,
                 AmbientLightColor  = new Vector3(0.5f, 0.5f, 0.5f),
-                FogEnabled         = true,
-                FogStart           = LoadDistance * 2 * 24f,
+                FogEnabled         = false,
+                FogStart           = _loadDistance * 2 * 24f,
                 FogColor           = new Vector3(135f / 255f, 206f / 255f, 235f / 255f),
-                FogEnd             = LoadDistance * 2 * 36f,
+                FogEnd             = _loadDistance * 2 * 36f,
             };
             _effect.DirectionalLight0.Enabled      = true;
             _effect.DirectionalLight0.Direction    = Vector3.Normalize(new Vector3(1, -1, 0.5f));
@@ -109,6 +113,67 @@ namespace game
 
             try   { _debugFont = Content.Load<SpriteFont>("DebugFont"); }
             catch { _debugFont = null; }
+
+            // ── Inicializar PauseMenu ────────────────────────────────
+            var initialSettings = new GameSettings
+            {
+                LoadDistance      = _loadDistance,
+                EnableVeryLowPoly = true,
+                FogEnabled        = false,
+                FovDegrees        = 80f,
+                WireframeMode     = false,
+                DirectionalLight  = true,
+                AmbientLight      = 0.5f,
+                MoveSpeed         = _camera.MoveSpeed,
+                MouseSensitivity  = _camera.MouseSensitivity,
+                ShowDebugHud      = false,
+            };
+
+            _pauseMenu = new PauseMenu(GraphicsDevice, _pixel, _debugFont, initialSettings);
+            _pauseMenu.OnResume += () => { IsMouseVisible = false; };
+            _pauseMenu.OnExit   += () => Exit();
+            _pauseMenu.OnSettingsChanged += ApplySettings;
+        }
+
+        // ============================================================
+        //  APLICAR AJUSTES DEL MENÚ
+        // ============================================================
+
+        private void ApplySettings(GameSettings s)
+        {
+            // ── Cámara
+            _camera.MoveSpeed        = s.MoveSpeed;
+            _camera.MouseSensitivity = s.MouseSensitivity;
+
+            // FOV: Camera.SetFov() recalcula _projectionMatrix en caliente
+            float aspect = (float)GraphicsDevice.Viewport.Width / GraphicsDevice.Viewport.Height;
+            _camera.SetFov(MathHelper.ToRadians(s.FovDegrees), aspect);
+
+            // ── Render
+            _effect.FogEnabled = s.FogEnabled;
+            _effect.DirectionalLight0.Enabled = s.DirectionalLight;
+            float al = s.AmbientLight;
+            _effect.AmbientLightColor = new Vector3(al, al, al);
+            _wireframeMode = s.WireframeMode;
+            _showDebug     = s.ShowDebugHud;
+
+            // ── Load distance: recrea ChunkManager si cambió
+            if (s.LoadDistance != _loadDistance)
+            {
+                _loadDistance = s.LoadDistance;
+                _chunkManager.Dispose();
+                _chunkManager = new ChunkManager(GraphicsDevice, chunkSize: 32, loadDistance: _loadDistance);
+            }
+
+            // Fog distances siempre se sincronizan con loadDistance actual
+            _effect.FogStart = _loadDistance * 2 * 24f;
+            _effect.FogEnd   = _loadDistance * 2 * 36f;
+
+            // ── VLP
+            _chunkManager.EnableVeryLowPoly = s.EnableVeryLowPoly;
+
+            // ── AO Strength (campo estatico en GreedyMesher)
+            GreedyMesher.AoStrength = s.AoStrength;
         }
 
         // ============================================================
@@ -119,10 +184,33 @@ namespace game
         {
             var keys = Keyboard.GetState();
 
-            if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed ||
-                keys.IsKeyDown(Keys.Escape))
-                Exit();
+            // ── Escape: abrir/cerrar menú ────────────────────────────
+            bool escNow = keys.IsKeyDown(Keys.Escape);
+            if (escNow && !_lastEscape)
+            {
+                if (_pauseMenu.IsOpen)
+                {
+                    _pauseMenu.Close();
+                    IsMouseVisible = false;
+                }
+                else
+                {
+                    _pauseMenu.Open();
+                    IsMouseVisible = true;
+                }
+            }
+            _lastEscape = escNow;
 
+            // ── Si el menú está abierto, solo actualiza el menú ──────
+            if (_pauseMenu.IsOpen)
+            {
+                IsMouseVisible = true;
+                _pauseMenu.Update(gameTime, keys, Mouse.GetState());
+                base.Update(gameTime);
+                return;
+            }
+
+            // ── Atajos cuando no hay menú ────────────────────────────
             bool f3 = keys.IsKeyDown(Keys.F3);
             if (f3 && !_lastF3) _showDebug = !_showDebug;
             _lastF3 = f3;
@@ -134,6 +222,7 @@ namespace game
             _camera.Update(gameTime);
             _chunkManager.Update(_camera.Position, null);
 
+            // FPS smoothing
             double elapsed = _frameTimer.Elapsed.TotalMilliseconds;
             _frameTimer.Restart();
 
@@ -184,8 +273,16 @@ namespace game
             if (_debugFont != null)
             {
                 _spriteBatch.Begin();
-                if (_showDebug) DrawF3Hud();
-                else            DrawMinimalHud();
+
+                if (!_pauseMenu.IsOpen)
+                {
+                    if (_showDebug) DrawF3Hud();
+                    else            DrawMinimalHud();
+                }
+
+                // El menú se dibuja dentro del mismo SpriteBatch.Begin/End
+                _pauseMenu.Draw(_spriteBatch);
+
                 _spriteBatch.End();
             }
 
@@ -204,7 +301,7 @@ namespace game
             string fpsStr = $"{_smoothFps:F0} fps";
             Vector2 sz = _debugFont.MeasureString(fpsStr);
             DrawTS(fpsStr, new Vector2(vw - sz.X - 8, 8), fpsCol);
-            DrawTS("[F3] debug", new Vector2(vw - 72, 8 + LineH), CLabel);
+            DrawTS("[F3] debug  [Esc] menu", new Vector2(vw - 148, 8 + LineH), CLabel);
         }
 
         // ============================================================
@@ -217,9 +314,9 @@ namespace game
             var chunkPos     = _chunkManager.GetChunkCoordinates(pos);
             var curChunk     = _chunkManager.GetChunk(chunkPos);
 
-            int lx = ((int)Math.Floor(pos.X) % ChunkSize + ChunkSize) % ChunkSize;
-            int ly = ((int)Math.Floor(pos.Y) % ChunkSize + ChunkSize) % ChunkSize;
-            int lz = ((int)Math.Floor(pos.Z) % ChunkSize + ChunkSize) % ChunkSize;
+            int lx = ((int)Math.Floor(pos.X) % 32 + 32) % 32;
+            int ly = ((int)Math.Floor(pos.Y) % 32 + 32) % 32;
+            int lz = ((int)Math.Floor(pos.Z) % 32 + 32) % 32;
 
             var L = new List<(string lbl, string val, Color col)>();
             var R = new List<(string lbl, string val, Color col)>();
@@ -252,24 +349,23 @@ namespace game
 
             // ── Columna derecha ──────────────────────────────────────
             R.Add(("", "[ World ]", CHeader));
-            R.Add(("chunk size", $"{ChunkSize}x{ChunkSize}x{ChunkSize}", CValue));
-            R.Add(("load dist",  $"{LoadDistance} chunks",               CValue));
-            R.Add(("lod dist",   $"{LoadDistance * 4} chunks",           CValue));
+            R.Add(("chunk size", "32x32x32", CValue));
+            R.Add(("load dist",  $"{_loadDistance} chunks", CValue));
+            R.Add(("lod dist",   $"{_loadDistance * 4} chunks", CValue));
 
             R.Add(("", "", CLabel));
             R.Add(("", "[ Chunks ]", CHeader));
 
-            int loaded  = _chunkManager.LoadedChunkCount;   // solo chunks con geometría real
-            int total   = _chunkManager.TotalChunkEntries;  // todos en diccionario (incluye aire)
+            int loaded  = _chunkManager.LoadedChunkCount;
+            int total   = _chunkManager.TotalChunkEntries;
             int queued  = _chunkManager.GenerationQueueCount;
             int working = _chunkManager.ActiveGenerationTasks;
             int pending = queued + working;
 
-            // "loaded" = chunks con mesh real / total en memoria (incluye chunks de aire puro)
-            R.Add(("loaded",   $"{loaded} / {total}",                    CValue));
-            R.Add(("building", $"{working}",                             working > 0 ? CWarn : CValue));
-            R.Add(("queued",   $"{queued}",                              queued  > 200 ? CWarn : CValue));
-            R.Add(("pending",  $"{pending}",                             pending > 200 ? CWarn : CGood));
+            R.Add(("loaded",   $"{loaded} / {total}",  CValue));
+            R.Add(("building", $"{working}",            working > 0 ? CWarn : CValue));
+            R.Add(("queued",   $"{queued}",             queued  > 200 ? CWarn : CValue));
+            R.Add(("pending",  $"{pending}",            pending > 200 ? CWarn : CGood));
 
             R.Add(("", "", CLabel));
             R.Add(("", "[ Current Chunk ]", CHeader));
@@ -293,15 +389,13 @@ namespace game
                 R.Add(("status", "not loaded", CWarn));
             }
 
-            // ── Fondos ───────────────────────────────────────────────
             int vw    = GraphicsDevice.Viewport.Width;
             int leftH = L.Count * LineH + PadY * 2;
             int rightH = R.Count * LineH + PadY * 2;
 
-            DrawPanel(PadX - 2,                  PadY - 2, ColW + 4, leftH  + 4);
-            DrawPanel(vw - ColW - PadX - 2,      PadY - 2, ColW + 4, rightH + 4);
+            DrawPanel(PadX - 2,             PadY - 2, ColW + 4, leftH  + 4);
+            DrawPanel(vw - ColW - PadX - 2, PadY - 2, ColW + 4, rightH + 4);
 
-            // ── Líneas ───────────────────────────────────────────────
             int y = PadY;
             foreach (var (lbl, val, col) in L) { DrawLine(PadX, y, lbl, val, col); y += LineH; }
 
@@ -351,24 +445,6 @@ namespace game
 
         private static Color FpsColor(float fps)
             => fps >= 50 ? CGood : fps >= 30 ? CWarn : CBad;
-
-        private static string CardinalFacing(Vector3 fwd)
-        {
-            float deg = MathHelper.ToDegrees((float)Math.Atan2(fwd.X, fwd.Z));
-            if (deg < 0) deg += 360f;
-            return deg switch
-            {
-                < 22.5f  => "South",
-                < 67.5f  => "SW",
-                < 112.5f => "West",
-                < 157.5f => "NW",
-                < 202.5f => "North",
-                < 247.5f => "NE",
-                < 292.5f => "East",
-                < 337.5f => "SE",
-                _        => "South"
-            };
-        }
 
         protected override void Dispose(bool disposing)
         {

@@ -107,6 +107,17 @@ namespace game
             }
         }
 
+
+        public void SetFov(float fovRadians, float aspectRatio,
+                           float nearPlane = 0.1f, float farPlane = 100000f)
+        {
+            _projectionMatrix = Matrix.CreatePerspectiveFieldOfView(
+                fovRadians,
+                aspectRatio,
+                nearPlane,
+                farPlane);
+        }
+
         /// <summary>
         /// Maneja la rotación con el ratón.
         /// Yaw (izquierda-derecha) es ilimitado.
@@ -134,7 +145,7 @@ namespace game
 
             // Deadzone para evitar que el recentrado afecte el siguiente frame
             const int deadzone = 5;
-            if (Math.Abs(mouseState.X - (int)windowCenter.X) > deadzone || 
+            if (Math.Abs(mouseState.X - (int)windowCenter.X) > deadzone ||
                 Math.Abs(mouseState.Y - (int)windowCenter.Y) > deadzone)
             {
                 // Solo aplicar delta si el mouse NO está en el centro (zona muerta del recentrado)
@@ -157,7 +168,7 @@ namespace game
 
             // Recentrar el mouse (DESPUÉS de calcular delta)
             Mouse.SetPosition((int)windowCenter.X, (int)windowCenter.Y);
-            
+
             // Actualizar última posición (ya que recentramos)
             _lastMouseX = (int)windowCenter.X;
             _lastMouseY = (int)windowCenter.Y;

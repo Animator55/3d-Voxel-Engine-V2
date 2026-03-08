@@ -18,6 +18,7 @@ namespace game
         // AO
         private readonly AmbientOcclusionCalculator _ao;
         private readonly float[] _aoBuffer = new float[4];
+        public static float AoStrength = 1.0f;
 
         public GreedyMesher(Chunk chunk, Chunk[,,] neighborChunks, int size = 16)
         {
@@ -69,11 +70,11 @@ namespace game
 
             var meshStopwatch = Stopwatch.StartNew();
 
-            ProcessFaceDirection(blocks, Axis.X,  1);
+            ProcessFaceDirection(blocks, Axis.X, 1);
             ProcessFaceDirection(blocks, Axis.X, -1);
-            ProcessFaceDirection(blocks, Axis.Y,  1);
+            ProcessFaceDirection(blocks, Axis.Y, 1);
             ProcessFaceDirection(blocks, Axis.Y, -1);
-            ProcessFaceDirection(blocks, Axis.Z,  1);
+            ProcessFaceDirection(blocks, Axis.Z, 1);
             ProcessFaceDirection(blocks, Axis.Z, -1);
 
             meshStopwatch.Stop();
@@ -115,7 +116,7 @@ namespace game
                         if (!IsFaceVisible(blocks, axis, direction, x, y, z))
                             continue;
 
-                        int width  = GreedyExpandWidth (blocks, processed, axis, direction, main, a, b, blockType);
+                        int width = GreedyExpandWidth(blocks, processed, axis, direction, main, a, b, blockType);
                         int height = GreedyExpandHeight(blocks, processed, axis, direction, main, a, b, width, blockType);
 
                         for (int wa = 0; wa < width; wa++)
@@ -228,17 +229,17 @@ namespace game
                     normal = new Vector3(direction, 0, 0);
                     if (direction > 0)
                     {
-                        corners[0] = new Vector3(faceOffset, a,         b);
-                        corners[1] = new Vector3(faceOffset, a + width,  b);
-                        corners[2] = new Vector3(faceOffset, a + width,  b + height);
-                        corners[3] = new Vector3(faceOffset, a,          b + height);
+                        corners[0] = new Vector3(faceOffset, a, b);
+                        corners[1] = new Vector3(faceOffset, a + width, b);
+                        corners[2] = new Vector3(faceOffset, a + width, b + height);
+                        corners[3] = new Vector3(faceOffset, a, b + height);
                     }
                     else
                     {
-                        corners[0] = new Vector3(faceOffset, a,          b);
-                        corners[1] = new Vector3(faceOffset, a,          b + height);
-                        corners[2] = new Vector3(faceOffset, a + width,  b + height);
-                        corners[3] = new Vector3(faceOffset, a + width,  b);
+                        corners[0] = new Vector3(faceOffset, a, b);
+                        corners[1] = new Vector3(faceOffset, a, b + height);
+                        corners[2] = new Vector3(faceOffset, a + width, b + height);
+                        corners[3] = new Vector3(faceOffset, a + width, b);
                     }
                     break;
 
@@ -246,17 +247,17 @@ namespace game
                     normal = new Vector3(0, direction, 0);
                     if (direction > 0)
                     {
-                        corners[0] = new Vector3(a,          faceOffset, b);
-                        corners[1] = new Vector3(a,          faceOffset, b + height);
-                        corners[2] = new Vector3(a + width,  faceOffset, b + height);
-                        corners[3] = new Vector3(a + width,  faceOffset, b);
+                        corners[0] = new Vector3(a, faceOffset, b);
+                        corners[1] = new Vector3(a, faceOffset, b + height);
+                        corners[2] = new Vector3(a + width, faceOffset, b + height);
+                        corners[3] = new Vector3(a + width, faceOffset, b);
                     }
                     else
                     {
-                        corners[0] = new Vector3(a,          faceOffset, b);
-                        corners[1] = new Vector3(a + width,  faceOffset, b);
-                        corners[2] = new Vector3(a + width,  faceOffset, b + height);
-                        corners[3] = new Vector3(a,          faceOffset, b + height);
+                        corners[0] = new Vector3(a, faceOffset, b);
+                        corners[1] = new Vector3(a + width, faceOffset, b);
+                        corners[2] = new Vector3(a + width, faceOffset, b + height);
+                        corners[3] = new Vector3(a, faceOffset, b + height);
                     }
                     break;
 
@@ -264,17 +265,17 @@ namespace game
                     normal = new Vector3(0, 0, direction);
                     if (direction > 0)
                     {
-                        corners[0] = new Vector3(a,          b,          faceOffset);
-                        corners[1] = new Vector3(a + width,  b,          faceOffset);
-                        corners[2] = new Vector3(a + width,  b + height, faceOffset);
-                        corners[3] = new Vector3(a,          b + height, faceOffset);
+                        corners[0] = new Vector3(a, b, faceOffset);
+                        corners[1] = new Vector3(a + width, b, faceOffset);
+                        corners[2] = new Vector3(a + width, b + height, faceOffset);
+                        corners[3] = new Vector3(a, b + height, faceOffset);
                     }
                     else
                     {
-                        corners[0] = new Vector3(a,          b,          faceOffset);
-                        corners[1] = new Vector3(a,          b + height, faceOffset);
-                        corners[2] = new Vector3(a + width,  b + height, faceOffset);
-                        corners[3] = new Vector3(a + width,  b,          faceOffset);
+                        corners[0] = new Vector3(a, b, faceOffset);
+                        corners[1] = new Vector3(a, b + height, faceOffset);
+                        corners[2] = new Vector3(a + width, b + height, faceOffset);
+                        corners[3] = new Vector3(a + width, b, faceOffset);
                     }
                     break;
 
