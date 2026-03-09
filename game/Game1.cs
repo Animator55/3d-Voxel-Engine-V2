@@ -15,8 +15,11 @@ namespace game
         private Camera _camera;
         private ChunkManager _chunkManager;
 
-        // Configuración inicial (puede cambiar en runtime)
         private int _loadDistance = 11;
+
+        // ── Skybox ───────────────────────────────────────────────────
+        private ProceduralSkybox _skybox;
+        private Effect _skyEffect;
 
         // ── Pausa ────────────────────────────────────────────────────
         private PauseMenu _pauseMenu;
@@ -24,37 +27,37 @@ namespace game
 
         // ── UI ──────────────────────────────────────────────────────
         private SpriteBatch _spriteBatch;
-        private SpriteFont  _debugFont;
-        private Texture2D   _pixel;
+        private SpriteFont _debugFont;
+        private Texture2D _pixel;
 
-        private bool _showDebug     = false;
+        private bool _showDebug = false;
         private bool _wireframeMode = false;
-        private bool _lastF3        = false;
-        private bool _lastT         = false;
+        private bool _lastF3 = false;
+        private bool _lastT = false;
 
         private RasterizerState _solidState;
         private RasterizerState _wireframeState;
 
-        // ── FPS real (Stopwatch, no ElapsedGameTime) ─────────────────
+        // ── FPS ──────────────────────────────────────────────────────
         private readonly Stopwatch _frameTimer = Stopwatch.StartNew();
         private const int FPS_WINDOW = 60;
         private readonly Queue<double> _frameTimes = new Queue<double>(FPS_WINDOW);
         private float _smoothFps;
         private float _frameMs;
 
-        // ── Colores ──────────────────────────────────────────────────
-        private static readonly Color CLabel  = new Color(180, 180, 180);
-        private static readonly Color CValue  = Color.White;
+        // ── Colores HUD ──────────────────────────────────────────────
+        private static readonly Color CLabel = new Color(180, 180, 180);
+        private static readonly Color CValue = Color.White;
         private static readonly Color CHeader = new Color(100, 220, 255);
-        private static readonly Color CWarn   = new Color(255, 200, 80);
-        private static readonly Color CGood   = new Color(100, 255, 140);
-        private static readonly Color CBad    = new Color(255, 80,  80);
+        private static readonly Color CWarn = new Color(255, 200, 80);
+        private static readonly Color CGood = new Color(100, 255, 140);
+        private static readonly Color CBad = new Color(255, 80, 80);
 
-        // ── Layout ───────────────────────────────────────────────────
-        private const int PadX  = 6;
-        private const int PadY  = 6;
+        // ── Layout HUD ───────────────────────────────────────────────
+        private const int PadX = 6;
+        private const int PadY = 6;
         private const int LineH = 14;
-        private const int ColW  = 230;
+        private const int ColW = 230;
 
         public Game1()
         {
@@ -62,12 +65,11 @@ namespace game
             Content.RootDirectory = "Content";
             IsMouseVisible = false;
 
-            _graphics.PreferredBackBufferWidth  = 1280;
+            _graphics.PreferredBackBufferWidth = 1280;
             _graphics.PreferredBackBufferHeight = 720;
             _graphics.HardwareModeSwitch = false;
 
             IsFixedTimeStep = false;
-
             _graphics.ApplyChanges();
         }
 
@@ -75,16 +77,16 @@ namespace game
         {
             float aspect = (float)GraphicsDevice.Viewport.Width / GraphicsDevice.Viewport.Height;
             _camera = new Camera(
-                startPosition:  new Vector3(0, 70, 0),
-                aspectRatio:    aspect,
+                startPosition: new Vector3(0, 70, 0),
+                aspectRatio: aspect,
                 graphicsDevice: GraphicsDevice,
-                fov:            MathHelper.ToRadians(80f),
-                nearPlane:      0.1f,
-                farPlane:       100000f);
+                fov: MathHelper.ToRadians(80f),
+                nearPlane: 0.1f,
+                farPlane: 100000f);
 
             _chunkManager = new ChunkManager(GraphicsDevice, chunkSize: 32, loadDistance: _loadDistance);
 
-            _solidState     = new RasterizerState { CullMode = CullMode.CullClockwiseFace, FillMode = FillMode.Solid };
+            _solidState = new RasterizerState { CullMode = CullMode.CullClockwiseFace, FillMode = FillMode.Solid };
             _wireframeState = new RasterizerState { CullMode = CullMode.CullClockwiseFace, FillMode = FillMode.WireFrame };
 
             base.Initialize();
@@ -97,67 +99,71 @@ namespace game
             _effect = new BasicEffect(GraphicsDevice)
             {
                 VertexColorEnabled = true,
-                LightingEnabled    = true,
-                AmbientLightColor  = new Vector3(0.5f, 0.5f, 0.5f),
-                FogEnabled         = false,
-                FogStart           = _loadDistance * 2 * 24f,
-                FogColor           = new Vector3(135f / 255f, 206f / 255f, 235f / 255f),
-                FogEnd             = _loadDistance * 2 * 36f,
+                LightingEnabled = true,
+                AmbientLightColor = new Vector3(0.5f, 0.5f, 0.5f),
+                FogEnabled = false,
+                FogStart = _loadDistance * 2 * 24f,
+                FogColor = new Vector3(135f / 255f, 206f / 255f, 235f / 255f),
+                FogEnd = _loadDistance * 2 * 36f,
             };
-            _effect.DirectionalLight0.Enabled      = true;
-            _effect.DirectionalLight0.Direction    = Vector3.Normalize(new Vector3(1, -1, 0.5f));
+            _effect.DirectionalLight0.Enabled = true;
+            _effect.DirectionalLight0.Direction = Vector3.Normalize(new Vector3(1, -1, 0.5f));
             _effect.DirectionalLight0.DiffuseColor = new Vector3(0.8f, 0.8f, 0.8f);
 
             _pixel = new Texture2D(GraphicsDevice, 1, 1);
             _pixel.SetData(new[] { Color.White });
 
-            try   { _debugFont = Content.Load<SpriteFont>("DebugFont"); }
+            try { _debugFont = Content.Load<SpriteFont>("DebugFont"); }
             catch { _debugFont = null; }
 
-            // ── Inicializar PauseMenu ────────────────────────────────
+            // ── Skybox ───────────────────────────────────────────────
+            _skyEffect = Content.Load<Effect>("Sky");
+            _skybox = new ProceduralSkybox(GraphicsDevice, _skyEffect, startHour: 8f);
+
+            // ── PauseMenu ────────────────────────────────────────────
             var initialSettings = new GameSettings
             {
-                LoadDistance      = _loadDistance,
+                LoadDistance = _loadDistance,
                 EnableVeryLowPoly = true,
-                FogEnabled        = false,
-                FovDegrees        = 80f,
-                WireframeMode     = false,
-                DirectionalLight  = true,
-                AmbientLight      = 0.5f,
-                MoveSpeed         = _camera.MoveSpeed,
-                MouseSensitivity  = _camera.MouseSensitivity,
-                ShowDebugHud      = false,
+                FogEnabled = false,
+                FovDegrees = 80f,
+                WireframeMode = false,
+                DirectionalLight = true,
+                AmbientLight = 0.5f,
+                MoveSpeed = _camera.MoveSpeed,
+                MouseSensitivity = _camera.MouseSensitivity,
+                ShowDebugHud = false,
             };
 
             _pauseMenu = new PauseMenu(GraphicsDevice, _pixel, _debugFont, initialSettings);
             _pauseMenu.OnResume += () => { IsMouseVisible = false; };
-            _pauseMenu.OnExit   += () => Exit();
+            _pauseMenu.OnExit += () => Exit();
             _pauseMenu.OnSettingsChanged += ApplySettings;
         }
 
         // ============================================================
-        //  APLICAR AJUSTES DEL MENÚ
+        //  APPLY SETTINGS
         // ============================================================
-
         private void ApplySettings(GameSettings s)
         {
-            // ── Cámara
-            _camera.MoveSpeed        = s.MoveSpeed;
+            _camera.MoveSpeed = s.MoveSpeed;
             _camera.MouseSensitivity = s.MouseSensitivity;
 
-            // FOV: Camera.SetFov() recalcula _projectionMatrix en caliente
             float aspect = (float)GraphicsDevice.Viewport.Width / GraphicsDevice.Viewport.Height;
             _camera.SetFov(MathHelper.ToRadians(s.FovDegrees), aspect);
 
-            // ── Render
             _effect.FogEnabled = s.FogEnabled;
-            _effect.DirectionalLight0.Enabled = s.DirectionalLight;
+            _wireframeMode = s.WireframeMode;
+            _showDebug = s.ShowDebugHud;
+
+            // Luz direccional: si el usuario la deshabilita en el menú,
+            // respetamos esa decisión y no dejamos que el skybox la reactive.
+            if (!s.DirectionalLight)
+                _effect.DirectionalLight0.Enabled = false;
+
             float al = s.AmbientLight;
             _effect.AmbientLightColor = new Vector3(al, al, al);
-            _wireframeMode = s.WireframeMode;
-            _showDebug     = s.ShowDebugHud;
 
-            // ── Load distance: recrea ChunkManager si cambió
             if (s.LoadDistance != _loadDistance)
             {
                 _loadDistance = s.LoadDistance;
@@ -165,26 +171,20 @@ namespace game
                 _chunkManager = new ChunkManager(GraphicsDevice, chunkSize: 32, loadDistance: _loadDistance);
             }
 
-            // Fog distances siempre se sincronizan con loadDistance actual
             _effect.FogStart = _loadDistance * 2 * 24f;
-            _effect.FogEnd   = _loadDistance * 2 * 36f;
+            _effect.FogEnd = _loadDistance * 2 * 36f;
 
-            // ── VLP
             _chunkManager.EnableVeryLowPoly = s.EnableVeryLowPoly;
-
-            // ── AO Strength (campo estatico en GreedyMesher)
             GreedyMesher.AoStrength = s.AoStrength;
         }
 
         // ============================================================
         //  UPDATE
         // ============================================================
-
         protected override void Update(GameTime gameTime)
         {
             var keys = Keyboard.GetState();
 
-            // ── Escape: abrir/cerrar menú ────────────────────────────
             bool escNow = keys.IsKeyDown(Keys.Escape);
             if (escNow && !_lastEscape)
             {
@@ -201,7 +201,6 @@ namespace game
             }
             _lastEscape = escNow;
 
-            // ── Si el menú está abierto, solo actualiza el menú ──────
             if (_pauseMenu.IsOpen)
             {
                 IsMouseVisible = true;
@@ -210,7 +209,6 @@ namespace game
                 return;
             }
 
-            // ── Atajos cuando no hay menú ────────────────────────────
             bool f3 = keys.IsKeyDown(Keys.F3);
             if (f3 && !_lastF3) _showDebug = !_showDebug;
             _lastF3 = f3;
@@ -222,7 +220,15 @@ namespace game
             _camera.Update(gameTime);
             _chunkManager.Update(_camera.Position, null);
 
-            // FPS smoothing
+            // ── Skybox update + iluminación dinámica ─────────────────
+            _skybox.Update(gameTime);
+            _skybox.ApplyLightingToEffect(_effect);
+
+            // Niebla dinámica sincronizada con el skybox
+            if (_effect.FogEnabled)
+                _effect.FogColor = _skybox.GetFogColor();
+
+            // ── FPS smoothing ────────────────────────────────────────
             double elapsed = _frameTimer.Elapsed.TotalMilliseconds;
             _frameTimer.Restart();
 
@@ -237,7 +243,7 @@ namespace game
                 double sum = 0;
                 foreach (var ft in _frameTimes) sum += ft;
                 double avgMs = sum / _frameTimes.Count;
-                _frameMs   = (float)avgMs;
+                _frameMs = (float)avgMs;
                 _smoothFps = avgMs > 0 ? (float)(1000.0 / avgMs) : 0f;
             }
 
@@ -247,15 +253,21 @@ namespace game
         // ============================================================
         //  DRAW
         // ============================================================
-
         protected override void Draw(GameTime gameTime)
         {
-            GraphicsDevice.Clear(new Color(135, 206, 235));
+            GraphicsDevice.Clear(Color.Black);
             GraphicsDevice.DepthStencilState = DepthStencilState.Default;
-            GraphicsDevice.RasterizerState   = _wireframeMode ? _wireframeState : _solidState;
-            GraphicsDevice.BlendState        = BlendState.Opaque;
+            GraphicsDevice.BlendState = BlendState.Opaque;
 
-            _effect.View       = _camera.ViewMatrix;
+            // ── 1. Skybox (sin depth write, antes que todo) ──────────
+            _skybox.Draw(_camera);
+
+            // ── 2. Chunks ────────────────────────────────────────────
+            GraphicsDevice.DepthStencilState = DepthStencilState.Default;
+            GraphicsDevice.RasterizerState = _wireframeMode ? _wireframeState : _solidState;
+            GraphicsDevice.BlendState = BlendState.Opaque;
+
+            _effect.View = _camera.ViewMatrix;
             _effect.Projection = _camera.ProjectionMatrix;
 
             var frustum = _camera.GetFrustum();
@@ -270,6 +282,7 @@ namespace game
                 _chunkManager.Draw(_effect, frustum);
             }
 
+            // ── 3. HUD ───────────────────────────────────────────────
             if (_debugFont != null)
             {
                 _spriteBatch.Begin();
@@ -277,12 +290,10 @@ namespace game
                 if (!_pauseMenu.IsOpen)
                 {
                     if (_showDebug) DrawF3Hud();
-                    else            DrawMinimalHud();
+                    else DrawMinimalHud();
                 }
 
-                // El menú se dibuja dentro del mismo SpriteBatch.Begin/End
                 _pauseMenu.Draw(_spriteBatch);
-
                 _spriteBatch.End();
             }
 
@@ -292,7 +303,6 @@ namespace game
         // ============================================================
         //  HUD MÍNIMO
         // ============================================================
-
         private void DrawMinimalHud()
         {
             int vw = GraphicsDevice.Viewport.Width;
@@ -302,17 +312,23 @@ namespace game
             Vector2 sz = _debugFont.MeasureString(fpsStr);
             DrawTS(fpsStr, new Vector2(vw - sz.X - 8, 8), fpsCol);
             DrawTS("[F3] debug  [Esc] menu", new Vector2(vw - 148, 8 + LineH), CLabel);
+
+            // Hora del día en el HUD mínimo
+            float tod = _skybox.TimeOfDay;
+            int hh = (int)tod;
+            int mm = (int)((tod - hh) * 60f);
+            string timeStr = $"{hh:00}:{mm:00}  {(_skybox.IsDayTime ? "day" : "night")}";
+            DrawTS(timeStr, new Vector2(vw - _debugFont.MeasureString(timeStr).X - 8, 8 + LineH * 2), CLabel);
         }
 
         // ============================================================
         //  HUD F3
         // ============================================================
-
         private void DrawF3Hud()
         {
-            Vector3 pos      = _camera.Position;
-            var chunkPos     = _chunkManager.GetChunkCoordinates(pos);
-            var curChunk     = _chunkManager.GetChunk(chunkPos);
+            Vector3 pos = _camera.Position;
+            var chunkPos = _chunkManager.GetChunkCoordinates(pos);
+            var curChunk = _chunkManager.GetChunk(chunkPos);
 
             int lx = ((int)Math.Floor(pos.X) % 32 + 32) % 32;
             int ly = ((int)Math.Floor(pos.Y) % 32 + 32) % 32;
@@ -327,7 +343,7 @@ namespace game
 
             Color fc = FpsColor(_smoothFps);
             L.Add(("fps", $"{_smoothFps:F1}", fc));
-            L.Add(("ms",  $"{_frameMs:F2}",  fc));
+            L.Add(("ms", $"{_frameMs:F2}", fc));
 
             L.Add(("", "", CLabel));
             L.Add(("", "[ Position ]", CHeader));
@@ -342,7 +358,6 @@ namespace game
 
             L.Add(("", "", CLabel));
             L.Add(("", "[ Camera ]", CHeader));
-
             L.Add(("", "", CLabel));
             L.Add(("wireframe", _wireframeMode ? "ON  [T]" : "off [T]",
                    _wireframeMode ? CWarn : CLabel));
@@ -350,22 +365,32 @@ namespace game
             // ── Columna derecha ──────────────────────────────────────
             R.Add(("", "[ World ]", CHeader));
             R.Add(("chunk size", "32x32x32", CValue));
-            R.Add(("load dist",  $"{_loadDistance} chunks", CValue));
-            R.Add(("lod dist",   $"{_loadDistance * 4} chunks", CValue));
+            R.Add(("load dist", $"{_loadDistance} chunks", CValue));
+            R.Add(("lod dist", $"{_loadDistance * 4} chunks", CValue));
+
+            // Hora del día
+            float tod = _skybox.TimeOfDay;
+            int hh = (int)tod;
+            int mm = (int)((tod - hh) * 60f);
+            R.Add(("", "", CLabel));
+            R.Add(("", "[ Time of Day ]", CHeader));
+            R.Add(("time", $"{hh:00}:{mm:00}", CValue));
+            R.Add(("phase", _skybox.IsDayTime ? "day" : "night",
+                   _skybox.IsDayTime ? CGood : new Color(100, 140, 255)));
 
             R.Add(("", "", CLabel));
             R.Add(("", "[ Chunks ]", CHeader));
 
-            int loaded  = _chunkManager.LoadedChunkCount;
-            int total   = _chunkManager.TotalChunkEntries;
-            int queued  = _chunkManager.GenerationQueueCount;
+            int loaded = _chunkManager.LoadedChunkCount;
+            int total = _chunkManager.TotalChunkEntries;
+            int queued = _chunkManager.GenerationQueueCount;
             int working = _chunkManager.ActiveGenerationTasks;
             int pending = queued + working;
 
-            R.Add(("loaded",   $"{loaded} / {total}",  CValue));
-            R.Add(("building", $"{working}",            working > 0 ? CWarn : CValue));
-            R.Add(("queued",   $"{queued}",             queued  > 200 ? CWarn : CValue));
-            R.Add(("pending",  $"{pending}",            pending > 200 ? CWarn : CGood));
+            R.Add(("loaded", $"{loaded} / {total}", CValue));
+            R.Add(("building", $"{working}", working > 0 ? CWarn : CValue));
+            R.Add(("queued", $"{queued}", queued > 200 ? CWarn : CValue));
+            R.Add(("pending", $"{pending}", pending > 200 ? CWarn : CGood));
 
             R.Add(("", "", CLabel));
             R.Add(("", "[ Current Chunk ]", CHeader));
@@ -378,9 +403,9 @@ namespace game
                 if (curChunk.DebugInfo != null)
                 {
                     var di = curChunk.DebugInfo;
-                    R.Add(("verts",   $"{di.VertexCount:N0}",   CValue));
-                    R.Add(("tris",    $"{di.TriangleCount:N0}", CValue));
-                    R.Add(("gen ms",  $"{di.MeshGenerationTimeMs:F1}", CValue));
+                    R.Add(("verts", $"{di.VertexCount:N0}", CValue));
+                    R.Add(("tris", $"{di.TriangleCount:N0}", CValue));
+                    R.Add(("gen ms", $"{di.MeshGenerationTimeMs:F1}", CValue));
                     R.Add(("mesh ms", $"{di.GreedyMeshingTimeMs:F1}", CValue));
                 }
             }
@@ -389,11 +414,11 @@ namespace game
                 R.Add(("status", "not loaded", CWarn));
             }
 
-            int vw    = GraphicsDevice.Viewport.Width;
+            int vw = GraphicsDevice.Viewport.Width;
             int leftH = L.Count * LineH + PadY * 2;
             int rightH = R.Count * LineH + PadY * 2;
 
-            DrawPanel(PadX - 2,             PadY - 2, ColW + 4, leftH  + 4);
+            DrawPanel(PadX - 2, PadY - 2, ColW + 4, leftH + 4);
             DrawPanel(vw - ColW - PadX - 2, PadY - 2, ColW + 4, rightH + 4);
 
             int y = PadY;
@@ -408,7 +433,6 @@ namespace game
         // ============================================================
         //  HELPERS
         // ============================================================
-
         private void DrawLine(int x, int y, string lbl, string val, Color col)
         {
             if (string.IsNullOrEmpty(lbl))
@@ -434,13 +458,13 @@ namespace game
 
         private void DrawCrosshair()
         {
-            int cx = GraphicsDevice.Viewport.Width  / 2;
+            int cx = GraphicsDevice.Viewport.Width / 2;
             int cy = GraphicsDevice.Viewport.Height / 2;
             const int s = 7, t = 1;
-            _spriteBatch.Draw(_pixel, new Rectangle(cx - s - 1, cy - t - 1, s*2+2, t*2+3), Color.Black * 0.5f);
-            _spriteBatch.Draw(_pixel, new Rectangle(cx - t - 1, cy - s - 1, t*2+3, s*2+2), Color.Black * 0.5f);
-            _spriteBatch.Draw(_pixel, new Rectangle(cx - s, cy - t, s*2, t*2+1), Color.White * 0.9f);
-            _spriteBatch.Draw(_pixel, new Rectangle(cx - t, cy - s, t*2+1, s*2), Color.White * 0.9f);
+            _spriteBatch.Draw(_pixel, new Rectangle(cx - s - 1, cy - t - 1, s * 2 + 2, t * 2 + 3), Color.Black * 0.5f);
+            _spriteBatch.Draw(_pixel, new Rectangle(cx - t - 1, cy - s - 1, t * 2 + 3, s * 2 + 2), Color.Black * 0.5f);
+            _spriteBatch.Draw(_pixel, new Rectangle(cx - s, cy - t, s * 2, t * 2 + 1), Color.White * 0.9f);
+            _spriteBatch.Draw(_pixel, new Rectangle(cx - t, cy - s, t * 2 + 1, s * 2), Color.White * 0.9f);
         }
 
         private static Color FpsColor(float fps)
@@ -452,6 +476,8 @@ namespace game
             {
                 _chunkManager?.Dispose();
                 _effect?.Dispose();
+                _skybox?.Dispose();
+                _skyEffect?.Dispose();
                 _spriteBatch?.Dispose();
                 _pixel?.Dispose();
             }
