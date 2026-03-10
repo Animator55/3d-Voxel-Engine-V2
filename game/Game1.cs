@@ -60,7 +60,7 @@ namespace game
                 startPosition: new Vector3(0, 70, 0),
                 aspectRatio: aspect,
                 graphicsDevice: GraphicsDevice,
-                fov: MathHelper.ToRadians(80f),
+                fov: MathHelper.ToRadians(90f),
                 nearPlane: 0.1f,
                 farPlane: 100000f);
             _chunkManager = new ChunkManager(GraphicsDevice, chunkSize: 32, loadDistance: _loadDistance);
@@ -76,7 +76,7 @@ namespace game
                 VertexColorEnabled = true,
                 LightingEnabled = true,
                 AmbientLightColor = new Vector3(0.5f, 0.5f, 0.5f),
-                FogEnabled = false,
+                FogEnabled = true,
                 FogStart = _loadDistance * 2 * 24f,
                 FogColor = new Vector3(135f / 255f, 206f / 255f, 235f / 255f),
                 FogEnd = _loadDistance * 2 * 36f,
@@ -96,8 +96,8 @@ namespace game
             {
                 LoadDistance = _loadDistance,
                 EnableVeryLowPoly = true,
-                FogEnabled = false,
-                FovDegrees = 80f,
+                FogEnabled = true,
+                FovDegrees = 90f,
                 WireframeMode = false,
                 DirectionalLight = true,
                 AmbientLight = 0.5f,

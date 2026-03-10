@@ -21,7 +21,7 @@ namespace game
             _chunk = chunk;
             _neighborChunks = neighborChunks;
             _size = size;
-            _ao = new AmbientOcclusionCalculator(this, aoStrength: 0.4f);
+            _ao = new AmbientOcclusionCalculator(this, aoStrength: AoStrength);
         }
 
         public bool IsSolid(int x, int y, int z)
@@ -164,7 +164,7 @@ namespace game
             };
         }
         private void AddRectangleFace(Axis axis, int direction, int main, int a, int b,
-            int width, int height, byte blockType, int x, int y, int z)
+    int width, int height, byte blockType, int x, int y, int z)
         {
             int baseVertex = _vertices.Count;
             if (baseVertex + 4 > 65535)
@@ -176,10 +176,17 @@ namespace game
             int nx = axis == Axis.X ? direction : 0;
             int ny = axis == Axis.Y ? direction : 0;
             int nz = axis == Axis.Z ? direction : 0;
+
+            int bx0, by0, bz0, bx1, by1, bz1, bx2, by2, bz2, bx3, by3, bz3;
+
             switch (axis)
             {
                 case Axis.X:
                     normal = new Vector3(direction, 0, 0);
+                    bx0 = x; by0 = a; bz0 = b;
+                    bx1 = x; by1 = a + width - 1; bz1 = b;
+                    bx2 = x; by2 = a + width - 1; bz2 = b + height - 1;
+                    bx3 = x; by3 = a; bz3 = b + height - 1;
                     if (direction > 0)
                     {
                         corners[0] = new Vector3(faceOffset, a, b);
@@ -197,6 +204,10 @@ namespace game
                     break;
                 case Axis.Y:
                     normal = new Vector3(0, direction, 0);
+                    bx0 = a; by0 = y; bz0 = b;
+                    bx1 = a; by1 = y; bz1 = b + height - 1;
+                    bx2 = a + width - 1; by2 = y; bz2 = b + height - 1;
+                    bx3 = a + width - 1; by3 = y; bz3 = b;
                     if (direction > 0)
                     {
                         corners[0] = new Vector3(a, faceOffset, b);
@@ -214,6 +225,10 @@ namespace game
                     break;
                 case Axis.Z:
                     normal = new Vector3(0, 0, direction);
+                    bx0 = a; by0 = b; bz0 = z;
+                    bx1 = a + width - 1; by1 = b; bz1 = z;
+                    bx2 = a + width - 1; by2 = b + height - 1; bz2 = z;
+                    bx3 = a; by3 = b + height - 1; bz3 = z;
                     if (direction > 0)
                     {
                         corners[0] = new Vector3(a, b, faceOffset);
@@ -233,10 +248,13 @@ namespace game
                     return;
             }
 
+            _ao.CalculateForFace(
+                bx0, by0, bz0,
+                bx1, by1, bz1,
+                bx2, by2, bz2,
+                bx3, by3, bz3,
+                nx, ny, nz, _aoBuffer);
 
-
-
-            _ao.CalculateForFace(x, y, z, nx, ny, nz, _aoBuffer);
             Color baseColor = BlockType.GetBlockColor(blockType);
             for (int i = 0; i < 4; i++)
             {
@@ -246,7 +264,6 @@ namespace game
 
             if (_aoBuffer[0] + _aoBuffer[2] < _aoBuffer[1] + _aoBuffer[3])
             {
-
                 _indices.Add((ushort)(baseVertex + 1));
                 _indices.Add((ushort)(baseVertex + 2));
                 _indices.Add((ushort)(baseVertex + 3));

@@ -51,9 +51,9 @@ float StarLayer(float3 p, float offset)
 float Stars(float3 dir, float nightFactor)
 {
     float s = 0.0;
-    s += StarLayer(dir * 120.0,            0.0);
-    s += StarLayer(dir * 120.0 * 2.3,     13.7);
-    s += StarLayer(dir * 120.0 * 5.29,    27.4);
+    s += StarLayer(dir * 120.0,        0.0);
+    s += StarLayer(dir * 120.0 * 2.3, 13.7);
+    s += StarLayer(dir * 120.0 * 5.29,27.4);
     return s * nightFactor;
 }
 
@@ -65,17 +65,20 @@ float4 MainPS(VSOut input) : COLOR
 
     float sunH = sunDir.y;
 
-    float dayFactor    = smoothstep(-0.12, 0.18, sunH);
-    float nightFactor  = 1.0 - smoothstep(-0.15, 0.10, sunH);
-    float sunsetFactor = smoothstep(-0.20, 0.00, sunH)
-                       * smoothstep( 0.30, 0.05, sunH);
+    // Wider transitions: day fades in/out over a longer sunH range
+    float dayFactor    = smoothstep(-0.25, 0.30, sunH);
+    float nightFactor  = 1.0 - smoothstep(-0.25, 0.20, sunH);
+    // Sunset/sunrise band is wider and centered around the horizon
+    float sunsetFactor = smoothstep(-0.30, 0.02, sunH)
+                       * smoothstep( 0.45, 0.05, sunH);
 
     float3 dayZenith     = float3(0.10, 0.28, 0.72);
     float3 dayHorizon    = float3(0.38, 0.60, 0.95);
     float3 sunsetZenith  = float3(0.30, 0.18, 0.40);
     float3 sunsetHorizon = float3(1.00, 0.42, 0.18);
-    float3 nightZenith   = float3(0.008, 0.008, 0.04);
-    float3 nightHorizon  = float3(0.015, 0.015, 0.06);
+    // Brighter night sky
+    float3 nightZenith   = float3(0.02, 0.02, 0.08);
+    float3 nightHorizon  = float3(0.03, 0.03, 0.10);
 
     float h    = saturate(dir.y * 0.5 + 0.5);
     float hPow = pow(h, 0.75);
@@ -87,13 +90,13 @@ float4 MainPS(VSOut input) : COLOR
 
     float3 sky = lerp(horizon, zenith, hPow);
 
-    float horizonGlow = pow(1.0 - abs(dir.y), 4.0) * sunsetFactor * 0.5;
+    float horizonGlow = pow(1.0 - abs(dir.y), 4.0) * sunsetFactor * 0.6;
     sky += float3(1.0, 0.35, 0.08) * horizonGlow;
 
     float sunDot  = max(dot(dir, sunDir), 0.0);
     float sunVis  = smoothstep(-0.02, 0.02, sunH);
     float sunDisc = pow(sunDot, 800.0) * sunVis;
-    float sunHalo = pow(sunDot,   6.0) * 0.35 * smoothstep(-0.15, 0.15, sunH);
+    float sunHalo = pow(sunDot,   6.0) * 0.35 * smoothstep(-0.25, 0.20, sunH);
     float sunAtmo = pow(sunDot,   2.5) * 0.15 * dayFactor;
 
     float3 sunColor     = lerp(float3(1.0, 0.55, 0.15), float3(1.0, 0.97, 0.85), dayFactor);
@@ -105,10 +108,11 @@ float4 MainPS(VSOut input) : COLOR
 
     float moonDot  = max(dot(dir, moonDir), 0.0);
     float moonDisc = pow(moonDot, 600.0) * nightFactor;
-    float moonGlow = pow(moonDot,   6.0) * 0.15 * nightFactor;
+    float moonGlow = pow(moonDot,   6.0) * 0.20 * nightFactor;
     sky += float3(0.88, 0.93, 1.0) * (moonDisc + moonGlow);
 
-    sky += float3(0.95, 0.95, 1.0) * Stars(dir, nightFactor) * 0.9;
+    // Brighter stars
+    sky += float3(0.95, 0.95, 1.0) * Stars(dir, nightFactor) * 1.2;
 
     return float4(sky, 1.0);
 }
@@ -120,4 +124,4 @@ technique SkyTechnique
         VertexShader = compile VS_SHADERMODEL MainVS();
         PixelShader  = compile PS_SHADERMODEL MainPS();
     }
-}
+}   

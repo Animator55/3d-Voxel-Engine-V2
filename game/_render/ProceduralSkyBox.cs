@@ -59,26 +59,33 @@ namespace game
         {
             Vector3 sunDir = GetSunDirection();
             float sunH = sunDir.Y;
-            float dayFactor = Smoothstep(-0.12f, 0.18f, sunH);
-            float sunsetFactor = Smoothstep(-0.20f, 0.00f, sunH)
-                               * Smoothstep(0.30f, 0.05f, sunH);
+
+            float dayFactor = Smoothstep(-0.25f, 0.30f, sunH);
+            float sunsetFactor = Smoothstep(-0.30f, 0.02f, sunH)
+                               * Smoothstep(0.45f, 0.05f, sunH);
+
+            // Brighter night ambient
             Vector3 ambDay = new Vector3(0.55f, 0.58f, 0.65f);
             Vector3 ambSunset = new Vector3(0.45f, 0.28f, 0.18f);
-            Vector3 ambNight = new Vector3(0.04f, 0.04f, 0.08f);
+            Vector3 ambNight = new Vector3(0.10f, 0.10f, 0.15f);
+
             Vector3 ambColor = Vector3.Lerp(ambNight, ambDay, dayFactor);
             ambColor = Vector3.Lerp(ambColor, ambSunset, sunsetFactor);
             effect.AmbientLightColor = ambColor;
+
             if (effect.DirectionalLight0 != null)
             {
                 effect.DirectionalLight0.Direction = Vector3.Normalize(-sunDir);
+
                 Vector3 diffDay = new Vector3(0.90f, 0.88f, 0.80f);
                 Vector3 diffSunset = new Vector3(1.00f, 0.55f, 0.20f);
                 Vector3 diffNight = Vector3.Zero;
+
                 Vector3 diffColor = Vector3.Lerp(diffNight, diffDay, dayFactor);
                 diffColor = Vector3.Lerp(diffColor, diffSunset, sunsetFactor * 0.8f);
                 effect.DirectionalLight0.DiffuseColor = diffColor;
                 effect.DirectionalLight0.SpecularColor = new Vector3(0.25f, 0.23f, 0.18f) * dayFactor;
-                effect.DirectionalLight0.Enabled = sunH > -0.15f;
+                effect.DirectionalLight0.Enabled = sunH > -0.25f;
             }
         }
         public Vector3 GetFogColor()
