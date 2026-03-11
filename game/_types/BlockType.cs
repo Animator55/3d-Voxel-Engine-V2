@@ -4,7 +4,6 @@ namespace game
 {
     public static class BlockType
     {
-        // ── IDs ───────────────────────────────────────────────────────
         public const byte Air    = 0;
         public const byte Stone  = 1;
         public const byte Dirt   = 2;
@@ -14,16 +13,14 @@ namespace game
         public const byte Wood   = 6;
         public const byte Snow   = 7;
         public const byte Leaves = 8;
-        public const byte Glowstone = 9;   // ← emissive example block
+        public const byte Glowstone = 9;  
 
-        // ── Solid / transparent ───────────────────────────────────────
         public static bool IsSolid(byte blockType)
             => blockType != Air && blockType != Water;
 
         public static bool IsTransparent(byte blockType)
             => blockType == Air || blockType == Water;
 
-        // ── Vertex colour ─────────────────────────────────────────────
         public static Color GetBlockColor(byte blockType)
         {
             return blockType switch
@@ -36,20 +33,14 @@ namespace game
                 Sand      => new Color(238, 214, 175),
                 Water     => new Color( 65, 105, 225),
                 Wood      => new Color(101,  67,  33),
-                Glowstone => new Color(255, 220, 100),   // warm yellow
+                Glowstone => new Color(255, 220, 100), 
                 _         => new Color(255,   0, 255)
             };
         }
 
-        // ── Emissive / light-source metadata ─────────────────────────
-        /// <summary>Returns true if this block type should act as a point-light source.</summary>
         public static bool IsEmissive(byte blockType)
             => blockType == Glowstone;
 
-        /// <summary>
-        /// Returns the light color, radius (world units), and intensity for an
-        /// emissive block.  Values are ignored when IsEmissive returns false.
-        /// </summary>
         public static (Vector3 color, float radius, float intensity) GetEmissiveLight(byte blockType)
         {
             return blockType switch

@@ -80,6 +80,11 @@ namespace game
                         blocks[bx, by, bz] = GetBlockAt(worldX + bx, worldY + by, worldZ + bz, h, biome, ir);
                 }
             PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize, heights, weights, riverMask, 0);
+
+            var structures = StructurePlacer.GetStructuresForChunk(
+                chunkX, chunkY, chunkZ, chunkSize, _seed, GetSurfaceHeight);
+            foreach (var s in structures)
+                StructurePlacer.Apply(blocks, s, chunkX, chunkY, chunkZ, chunkSize, null);
             return blocks;
         }
 
@@ -266,6 +271,14 @@ namespace game
             };
         }
 
+        public int GetSurfaceHeight(float wx, float wz)
+        {
+            SoftBiomeWeights(wx, wz,
+                out float wPl, out float wFo, out float wTa,
+                out float wDe, out float wMo, out float wOc);
+            return GetTerrainHeight(wx, wz, wPl, wFo, wTa, wDe, wMo, wOc, out _);
+        }
+
 
 
         private static readonly (int, int, int)[] _trunk0 = { (0, 0, 0), (0, 1, 0), (0, 2, 0), (0, 3, 0), (0, 4, 0), (0, 5, 0) };
@@ -382,6 +395,14 @@ namespace game
                     }
                 }
             PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize, heights, weights, riverMask, simplificationLevel);
+            
+            if (simplificationLevel == 0)
+            {
+                var structures = StructurePlacer.GetStructuresForChunk(
+                    chunkX, chunkY, chunkZ, chunkSize, _seed, GetSurfaceHeight);
+                foreach (var s in structures)
+                    StructurePlacer.Apply(blocks, s, chunkX, chunkY, chunkZ, chunkSize, null);
+            }
             return blocks;
         }
 

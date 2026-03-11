@@ -11,10 +11,6 @@ namespace game
 {
     public partial class ChunkManager
     {
-        /// <summary>
-        /// Draws all visible chunks using the custom VoxelLitEffect shader.
-        /// Signature mirrors the existing BasicEffect overload exactly.
-        /// </summary>
         public void Draw(VoxelLitEffect effect,
                          BoundingFrustum cameraFrustum,
                          Vector3Int?     currentChunk = null,
@@ -22,7 +18,6 @@ namespace game
         {
             lock (_chunkLock)
             {
-                // ── High-quality chunks ────────────────────────────────
                 foreach (var chunk in _chunks.Values.ToList())
                 {
                     if (wireframeOnly && currentChunk.HasValue &&
@@ -41,7 +36,6 @@ namespace game
                     chunk.Draw(_graphicsDevice, cameraFrustum);
                 }
 
-                // ── Low-poly LOD chunks ────────────────────────────────
                 foreach (var chunk in _lowPolyChunks.Values.ToList())
                 {
                     if (!IsChunkInFrustum(chunk.X, chunk.Y, chunk.Z, cameraFrustum)) continue;
@@ -65,7 +59,6 @@ namespace game
                     chunk.ActiveLevel = saved;
                 }
 
-                // ── Very-low-poly far chunks ───────────────────────────
                 if (_enableVeryLowPoly)
                 {
                     foreach (var chunk in _veryLowPolyChunks.Values.ToList())

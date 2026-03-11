@@ -4,23 +4,11 @@ using System;
 
 namespace game
 {
-    /// <summary>
-    /// Thin C# wrapper around VoxelLit.fx.
-    /// Mirrors the subset of BasicEffect used by ChunkManager/Game1,
-    /// so the swap is near-mechanical.
-    ///
-    /// Point lights (emissive blocks + camera) live entirely in shader
-    /// uniforms — no chunk rebuilds ever needed.
-    /// </summary>
     public sealed class VoxelLitEffect : IDisposable
     {
-        // ── constants ────────────────────────────────────────────────
         public const int MAX_POINT_LIGHTS = 8;
 
-        // ── backing Effect ────────────────────────────────────────────
         private readonly Effect _fx;
-
-        // ── cached parameter handles (avoid string lookup every frame) ─
         private readonly EffectParameter _pWorld;
         private readonly EffectParameter _pView;
         private readonly EffectParameter _pProjection;
@@ -47,21 +35,16 @@ namespace game
         private readonly EffectParameter _pFogEnd;
         private readonly EffectParameter _pFogColor;
 
-        // ── point-light staging arrays (avoid per-frame allocation) ───
         private readonly Vector3[] _plPos       = new Vector3[MAX_POINT_LIGHTS];
         private readonly Vector3[] _plColor     = new Vector3[MAX_POINT_LIGHTS];
         private readonly float[]   _plRadius    = new float  [MAX_POINT_LIGHTS];
         private readonly float[]   _plIntensity = new float  [MAX_POINT_LIGHTS];
         private int _plCount;
 
-        // ── public properties ─────────────────────────────────────────
-
-        // Matrices
         public Matrix World      { set => _pWorld     .SetValue(value); }
         public Matrix View       { set => _pView      .SetValue(value); }
         public Matrix Projection { set => _pProjection.SetValue(value); }
 
-        // Ambient / sun  (matches naming used in Game1 / ProceduralSkybox)
         public Vector3 AmbientLightColor
         {
             set => _pAmbient.SetValue(value);
@@ -74,7 +57,6 @@ namespace game
             set { _dirEnabled = value; _pDirEnabled.SetValue(value); }
         }
 
-        /// <summary>Direction the light travels (i.e. -sunDir in BasicEffect terms).</summary>
         public Vector3 DirectionalLightDirection
         {
             set => _pDirDir.SetValue(value);
@@ -85,7 +67,6 @@ namespace game
             set => _pDirDiff.SetValue(value);
         }
 
-        // Fog
         private bool _fogEnabled = true;
         public bool FogEnabled
         {
@@ -96,7 +77,6 @@ namespace game
         public float FogEnd   { set => _pFogEnd  .SetValue(value); }
         public Vector3 FogColor { set => _pFogColor.SetValue(value); }
 
-        // Camera light
         private bool _cameraLightEnabled = true;
         public bool CameraLightEnabled
         {
@@ -107,52 +87,40 @@ namespace game
         public float   CameraLightIntensity { set => _pCamIntensity.SetValue(value); }
         public Vector3 CameraLightColor     { set => _pCamColor    .SetValue(value); }
 
-        /// <summary>
-        /// Call once per frame before drawing chunks.
-        /// Uploads camera world position so the shader can compute distances.
-        /// </summary>
         public void SetCameraPosition(Vector3 pos) => _pCamPos.SetValue(pos);
 
-        // ── technique / pass ──────────────────────────────────────────
         public EffectTechnique CurrentTechnique => _fx.CurrentTechnique;
 
-        // ── ctor ──────────────────────────────────────────────────────
         public VoxelLitEffect(Effect loadedEffect)
         {
             _fx = loadedEffect ?? throw new ArgumentNullException(nameof(loadedEffect));
 
-            // matrices
             _pWorld      = _fx.Parameters["World"];
             _pView       = _fx.Parameters["View"];
             _pProjection = _fx.Parameters["Projection"];
 
-            // sun / ambient
             _pAmbient    = _fx.Parameters["AmbientLightColor"];
             _pDirDir     = _fx.Parameters["DirLight0Direction"];
             _pDirDiff    = _fx.Parameters["DirLight0Diffuse"];
             _pDirEnabled = _fx.Parameters["DirLight0Enabled"];
 
-            // camera light
             _pCamPos          = _fx.Parameters["CameraPosition"];
             _pCamLightEnabled = _fx.Parameters["CameraLightEnabled"];
             _pCamRadius       = _fx.Parameters["CameraLightRadius"];
             _pCamIntensity    = _fx.Parameters["CameraLightIntensity"];
             _pCamColor        = _fx.Parameters["CameraLightColor"];
 
-            // point lights
             _pPlPos       = _fx.Parameters["PointLightPos"];
             _pPlColor     = _fx.Parameters["PointLightColor"];
             _pPlRadius    = _fx.Parameters["PointLightRadius"];
             _pPlIntensity = _fx.Parameters["PointLightIntensity"];
             _pPlCount     = _fx.Parameters["PointLightCount"];
 
-            // fog
             _pFogEnabled = _fx.Parameters["FogEnabled"];
             _pFogStart   = _fx.Parameters["FogStart"];
             _pFogEnd     = _fx.Parameters["FogEnd"];
             _pFogColor   = _fx.Parameters["FogColor"];
 
-            // safe defaults
             _pCamRadius   .SetValue(18f);
             _pCamIntensity.SetValue(1.4f);
             _pCamColor    .SetValue(new Vector3(1f, 0.92f, 0.75f));
@@ -160,21 +128,11 @@ namespace game
             _pPlCount.SetValue(0);
         }
 
-        // ── Point-light management ────────────────────────────────────
-
-        /// <summary>
-        /// Clears the emissive-block list.  Call at the start of each frame
-        /// if you rebuild the list dynamically, or whenever blocks change.
-        /// </summary>
         public void ClearPointLights()
         {
             _plCount = 0;
         }
 
-        /// <summary>
-        /// Adds one emissive point light.  Silently ignored if MAX_POINT_LIGHTS reached.
-        /// <paramref name="worldCenter"/> is the centre of the emissive block in world space.
-        /// </summary>
         public void AddPointLight(Vector3 worldCenter, Vector3 color, float radius, float intensity)
         {
             if (_plCount >= MAX_POINT_LIGHTS) return;
@@ -185,10 +143,6 @@ namespace game
             _plCount++;
         }
 
-        /// <summary>
-        /// Flushes the point-light staging arrays to the GPU.
-        /// Call once per frame AFTER all AddPointLight calls, before drawing.
-        /// </summary>
         public void UploadPointLights()
         {
             _pPlCount.SetValue(_plCount);
@@ -201,12 +155,6 @@ namespace game
             }
         }
 
-        // ── bridge helpers used by ApplyLightingToEffect ──────────────
-
-        /// <summary>
-        /// Mirrors the BasicEffect bridge used in ProceduralSkybox.ApplyLightingToEffect.
-        /// Call this from a small extension / overload so Skybox doesn't need refactoring.
-        /// </summary>
         public void ApplyFromSkybox(ProceduralSkybox skybox)
         {
             Vector3 sunDir = skybox.GetSunDirection();
@@ -242,7 +190,6 @@ namespace game
             DirectionalLightEnabled   = sunH > -0.25f;
         }
 
-        // ── IDisposable ───────────────────────────────────────────────
         public void Dispose() => _fx.Dispose();
     }
 }
