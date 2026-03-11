@@ -414,6 +414,9 @@ namespace game
 
     public class GameSettings
     {
+        public bool  CameraLightEnabled { get; set; }  = true;
+        public float CameraLightRadius  { get; set; }  = 18f;
+        public float CameraLightIntensity { get; set; } = 1.4f;
         public int LoadDistance { get; set; } = 11;
         public bool EnableVeryLowPoly { get; set; } = true;
         public bool FogEnabled { get; set; } = false;

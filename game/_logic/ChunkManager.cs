@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 namespace game
 {
-    public class ChunkManager
+    public partial class ChunkManager
     {
         private readonly Dictionary<Vector3Int, Chunk> _chunks;
         private readonly Dictionary<Vector3Int, LowPolyChunk> _lowPolyChunks;

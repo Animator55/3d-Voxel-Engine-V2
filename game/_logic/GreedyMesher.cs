@@ -15,7 +15,7 @@ namespace game
 
         private readonly AmbientOcclusionCalculator _ao;
         private readonly float[] _aoBuffer = new float[4];
-        public static float AoStrength = 1.0f;
+        public static float AoStrength = 0.4f;
         public GreedyMesher(Chunk chunk, Chunk[,,] neighborChunks, int size = 16)
         {
             _chunk = chunk;

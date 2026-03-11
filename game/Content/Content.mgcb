@@ -26,3 +26,8 @@
 /processorParam:DebugMode=Auto
 /build:Sky.fx
 
+#begin VoxelLit.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:VoxelLit.fx
