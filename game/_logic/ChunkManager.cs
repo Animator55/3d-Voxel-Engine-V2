@@ -133,6 +133,13 @@ namespace game
             var lowPolyZone = new HashSet<Vector3Int>();
             var veryLowPolyZone = new HashSet<Vector3Int>();
             var chunksToGenerate = new List<(Vector3Int pos, ChunkType type, int level)>();
+
+            // Capturar la cola ANTES de cualquier modificación a los diccionarios.
+            // Esto preserva trabajo pendiente que aún no arrancó como tarea.
+            (Vector3Int pos, ChunkType type, int level)[] previousQueue;
+            lock (_queueLock)
+                previousQueue = _generationQueue.ToArray();
+
             const int HqDistY = 3;
             for (int x = -_loadDistance; x <= _loadDistance; x++)
                 for (int y = -HqDistY; y <= HqDistY; y++)
@@ -173,7 +180,10 @@ namespace game
             }
             lock (_chunkLock)
             {
-                var stalePending = _pendingHqAfterLp.Where(p => !highQualityZone.Contains(p)).ToList();
+                // FIX: limpiar pending si ya no está en HQ zone O si su LP fue borrado
+                var stalePending = _pendingHqAfterLp
+                    .Where(p => !highQualityZone.Contains(p) || !_lowPolyChunks.ContainsKey(p))
+                    .ToList();
                 foreach (var p in stalePending) _pendingHqAfterLp.Remove(p);
 
                 foreach (var cp in _lowPolyChunks.Keys.ToList())
@@ -201,7 +211,6 @@ namespace game
                         _lowPolyChunks[cp] = new LowPolyChunk(cp.X, cp.Y, cp.Z, _chunkSize);
                         chunksToGenerate.Add((cp, ChunkType.LowPoly, LowPolyChunk.LOD_LEVELS - 1));
                         _pendingHqAfterLp.Add(cp);
-
                     }
                 }
 
@@ -211,11 +220,17 @@ namespace game
                     _chunks[cp].Dispose();
                     _chunks.Remove(cp);
                     _pendingHqAfterLp.Remove(cp);
-                    if (lowPolyZone.Contains(cp) && !_lowPolyChunks.ContainsKey(cp))
+                    // FIX: re-encolar LP siempre (no solo si no existe), para cubrir el
+                    // caso en que el LP existe pero su mesh quedó pendiente o incompleta
+                    if (lowPolyZone.Contains(cp))
                     {
-                        _lowPolyChunks[cp] = new LowPolyChunk(cp.X, cp.Y, cp.Z, _chunkSize);
+                        if (!_lowPolyChunks.ContainsKey(cp))
+                            _lowPolyChunks[cp] = new LowPolyChunk(cp.X, cp.Y, cp.Z, _chunkSize);
+
+                        var lp = _lowPolyChunks[cp];
                         for (int lvl = LowPolyChunk.LOD_LEVELS - 1; lvl >= 0; lvl--)
-                            chunksToGenerate.Add((cp, ChunkType.LowPoly, lvl));
+                            if (lp.NeedsMesh(lvl))
+                                chunksToGenerate.Add((cp, ChunkType.LowPoly, lvl));
                         RemoveVlpAt(cp);
                     }
                 }
@@ -228,7 +243,6 @@ namespace game
                         _lowPolyChunks[cp] = new LowPolyChunk(cp.X, cp.Y, cp.Z, _chunkSize);
                         for (int lvl = LowPolyChunk.LOD_LEVELS - 1; lvl >= 0; lvl--)
                             chunksToGenerate.Add((cp, ChunkType.LowPoly, lvl));
-
                     }
                     else
                     {
@@ -254,7 +268,6 @@ namespace game
                 }
                 if (_enableVeryLowPoly)
                 {
-
                     foreach (var cp in veryLowPolyZone)
                     {
                         if (!_veryLowPolyChunks.ContainsKey(cp))
@@ -282,9 +295,46 @@ namespace game
                         _veryLowPolyChunks.Remove(cp);
                     }
                 }
+
             }
+
             UpdateActiveLevels(centerChunk);
-            chunksToGenerate.Sort((a, b) =>
+
+            // Construir el set final mezclando trabajo nuevo con trabajo previo sobreviviente.
+            // Una entrada previa "sobrevive" si:
+            //   1. Su chunk todavía existe en el diccionario correspondiente.
+            //   2. No está ya cubierta por chunksToGenerate (evitar duplicados).
+            //   3. No tiene mesh todavía (de lo contrario no hace falta regenerar).
+            var finalSet = new HashSet<(Vector3Int, ChunkType, int)>(chunksToGenerate);
+            var finalList = new List<(Vector3Int pos, ChunkType type, int level)>(chunksToGenerate);
+
+            lock (_chunkLock)
+            {
+                foreach (var e in previousQueue)
+                {
+                    if (finalSet.Contains(e)) continue;
+
+                    bool stillNeeded;
+                    switch (e.type)
+                    {
+                        case ChunkType.HighQuality:
+                            stillNeeded = _chunks.TryGetValue(e.pos, out var hq) && !hq.HasMesh && !hq.IsMeshBuilding;
+                            break;
+                        case ChunkType.LowPoly:
+                            stillNeeded = _lowPolyChunks.TryGetValue(e.pos, out var lp) && lp.NeedsMesh(e.level);
+                            break;
+                        default:
+                            stillNeeded = _veryLowPolyChunks.TryGetValue(e.pos, out var vlp) && !vlp.HasMesh && !vlp.IsMeshBuilding;
+                            break;
+                    }
+
+                    if (!stillNeeded) continue;
+                    finalSet.Add(e);
+                    finalList.Add(e);
+                }
+            }
+
+            finalList.Sort((a, b) =>
             {
                 int ta = TypePriority(a.type), tb = TypePriority(b.type);
                 if (ta != tb) return ta.CompareTo(tb);
@@ -297,10 +347,11 @@ namespace game
                 int cz = a.pos.Z.CompareTo(b.pos.Z); if (cz != 0) return cz;
                 return a.level.CompareTo(b.level);
             });
+
             lock (_queueLock)
             {
                 _generationQueue.Clear();
-                foreach (var e in chunksToGenerate) _generationQueue.Enqueue(e);
+                foreach (var e in finalList) _generationQueue.Enqueue(e);
             }
         }
         private void RemoveVlpAt(Vector3Int cp)
@@ -393,6 +444,15 @@ namespace game
                     _ => _veryLowPolyChunks.ContainsKey(cp)
                 };
                 if (!exists) return;
+
+                // FIX: guard para HQ — evita lanzar tareas duplicadas y permite
+                // detectar correctamente chunks "en vuelo" en el rescate de huérfanos
+                if (type == ChunkType.HighQuality && _chunks.TryGetValue(cp, out var hqCheck))
+                {
+                    if (hqCheck.HasMesh || hqCheck.IsMeshBuilding) return;
+                    hqCheck.MarkMeshBuildStart();
+                }
+
                 if (type == ChunkType.LowPoly && _lowPolyChunks.TryGetValue(cp, out var lpCheck))
                 {
                     if (lpCheck.HasMeshForLevel(level) || lpCheck.IsMeshBuildingForLevel(level)) return;
@@ -420,6 +480,9 @@ namespace game
                 catch (Exception ex)
                 {
                     System.Diagnostics.Debug.WriteLine($"[ChunkManager] Error {type} {cp}: {ex.Message}");
+                    // FIX: limpiar IsMeshBuilding en cualquier tipo que falle
+                    if (type == ChunkType.HighQuality)
+                        lock (_chunkLock) { if (_chunks.TryGetValue(cp, out var c)) c.MarkMeshEmpty(); }
                     if (type == ChunkType.VeryLowPoly)
                         lock (_chunkLock) { if (_veryLowPolyChunks.TryGetValue(cp, out var v)) v.MarkMeshFailed(); }
                 }
@@ -436,7 +499,10 @@ namespace game
             Chunk chunk = null;
             lock (_chunkLock)
             {
-                if (_chunks.TryGetValue(cp, out chunk)) { chunk.SetBlocks(blocks); chunk.MarkMeshBuildStart(); }
+                // FIX: NO llamar MarkMeshBuildStart aquí, ya se hizo en StartChunkGenerationTask.
+                // Solo asignar blocks si el chunk todavía existe.
+                if (_chunks.TryGetValue(cp, out chunk))
+                    chunk.SetBlocks(blocks);
             }
             if (chunk == null) return;
             Chunk[,,] neighbors = new Chunk[3, 3, 3];
@@ -502,7 +568,14 @@ namespace game
                 while (_meshDataQueue.Count > 0)
                 {
                     var md = _meshDataQueue.Dequeue();
-                    lock (_chunkLock) { if (_chunks.TryGetValue(md.ChunkPos, out var c)) c.SetMeshData(md.Vertices, md.Indices, _graphicsDevice, md.DebugInfo); }
+                    lock (_chunkLock)
+                    {
+                        // FIX: solo aplicar si el chunk sigue existiendo y aún no tiene mesh.
+                        // Descarta resultados de tareas en vuelo que llegaron tarde (el chunk
+                        // fue descartado y recreado entre que la tarea arrancó y terminó).
+                        if (_chunks.TryGetValue(md.ChunkPos, out var c) && !c.HasMesh)
+                            c.SetMeshData(md.Vertices, md.Indices, _graphicsDevice, md.DebugInfo);
+                    }
                 }
                 while (_lowPolyMeshDataQueue.Count > 0)
                 {

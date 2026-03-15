@@ -389,6 +389,7 @@ namespace game
                     for (int by = 0; by < chunkSize; by++)
                     {
                         int wy = worldY + by;
+                        if(wy < SeaLevel) continue;
                         if (wy >= h - sc && wy <= h) blocks[bx, by, bz] = wy == h ? GetSurfaceBlock(biome, ir, h) : BlockType.Dirt;
                         else if (wy >= SeaLevel && wy < h - sc) blocks[bx, by, bz] = BlockType.Stone;
                         else if (wy <= SeaLevel && wy > h) blocks[bx, by, bz] = BlockType.Water;

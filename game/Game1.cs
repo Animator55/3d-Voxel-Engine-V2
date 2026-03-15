@@ -17,7 +17,7 @@ namespace game
 
         private Camera       _camera;
         private ChunkManager _chunkManager;
-        private int          _loadDistance = 11;
+        private int          _loadDistance = 5;
 
         private ProceduralSkybox _skybox;
         private Effect           _skyEffect;
@@ -90,7 +90,7 @@ namespace game
                                    GraphicsDevice.Viewport.Height;
 
             _camera = new Camera(
-                startPosition : new Vector3(0, 70, 0),
+                startPosition : new Vector3(0, 60, 0),
                 aspectRatio   : aspect,
                 graphicsDevice: GraphicsDevice,
                 fov           : MathHelper.ToRadians(90f),
@@ -138,7 +138,7 @@ namespace game
 
             // ── Demo: pre-place a glowstone block at a visible location ──
             // Remove or move these in your actual game.
-            _emissiveBlocks.Add((new Vector3(16, 72, 0),  BlockType.Glowstone));
+            _emissiveBlocks.Add((new Vector3(0, 40, 0),  BlockType.Glowstone));
             _emissiveBlocks.Add((new Vector3(-32, 68, 16), BlockType.Glowstone));
 
             // ── Pause menu ─────────────────────────────────────────────
