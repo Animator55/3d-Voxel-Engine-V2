@@ -11,62 +11,61 @@ namespace game
     {
         private GraphicsDeviceManager _graphics;
 
-        // ── NEW: custom shader wrapper (replaces BasicEffect) ──────────
         private VoxelLitEffect _voxelEffect;
-        private Effect         _voxelFx;        // raw Effect asset
+        private Effect _voxelFx;
 
-        private Camera       _camera;
+        // ── Water shader ──────────────────────────────────────────────
+        private WaterEffect _waterEffect;
+        private Effect _waterFx;
+        private float _waterTime;
+
+        private Camera _camera;
         private ChunkManager _chunkManager;
-        private int          _loadDistance = 5;
+        private int _loadDistance = 5;
 
         private ProceduralSkybox _skybox;
-        private Effect           _skyEffect;
+        private Effect _skyEffect;
 
         private PauseMenu _pauseMenu;
-        private bool      _lastEscape = false;
+        private bool _lastEscape = false;
 
         private SpriteBatch _spriteBatch;
-        private SpriteFont  _debugFont;
-        private Texture2D   _pixel;
+        private SpriteFont _debugFont;
+        private Texture2D _pixel;
 
-        private bool _showDebug    = false;
+        private bool _showDebug = false;
         private bool _wireframeMode = false;
         private bool _lastF3 = false;
-        private bool _lastT  = false;
+        private bool _lastT = false;
 
         private RasterizerState _solidState;
         private RasterizerState _wireframeState;
 
-        // ── FPS smoothing ──────────────────────────────────────────────
-        private readonly Stopwatch      _frameTimer  = Stopwatch.StartNew();
-        private const    int            FPS_WINDOW   = 60;
-        private readonly Queue<double>  _frameTimes  = new Queue<double>(FPS_WINDOW);
+        // ── FPS ───────────────────────────────────────────────────────
+        private readonly Stopwatch _frameTimer = Stopwatch.StartNew();
+        private const int FPS_WINDOW = 60;
+        private readonly Queue<double> _frameTimes = new Queue<double>(FPS_WINDOW);
         private float _smoothFps;
         private float _frameMs;
 
-        // ── HUD colours ────────────────────────────────────────────────
-        private static readonly Color CLabel  = new Color(180, 180, 180);
-        private static readonly Color CValue  = Color.White;
+        // ── HUD colours ───────────────────────────────────────────────
+        private static readonly Color CLabel = new Color(180, 180, 180);
+        private static readonly Color CValue = Color.White;
         private static readonly Color CHeader = new Color(100, 220, 255);
-        private static readonly Color CWarn   = new Color(255, 200,  80);
-        private static readonly Color CGood   = new Color(100, 255, 140);
-        private static readonly Color CBad    = new Color(255,  80,  80);
+        private static readonly Color CWarn = new Color(255, 200, 80);
+        private static readonly Color CGood = new Color(100, 255, 140);
+        private static readonly Color CBad = new Color(255, 80, 80);
 
-        private const int PadX  = 6;
-        private const int PadY  = 6;
+        private const int PadX = 6;
+        private const int PadY = 6;
         private const int LineH = 14;
-        private const int ColW  = 230;
+        private const int ColW = 230;
 
-        // ── Emissive block registry ────────────────────────────────────
-        // A simple list of emissive blocks the player has placed in the world.
-        // In a real game you'd populate this from your block-placement system.
-        // For now it's public so the pause menu / console can add entries.
         private readonly List<(Vector3 worldPos, byte blockType)> _emissiveBlocks
             = new List<(Vector3, byte)>();
 
-        // ── Camera-light settings (exposed to pause menu) ─────────────
-        private bool  _cameraLightEnabled   = true;
-        private float _cameraLightRadius    = 18f;
+        private bool _cameraLightEnabled = true;
+        private float _cameraLightRadius = 18f;
         private float _cameraLightIntensity = 1.4f;
 
         // ─────────────────────────────────────────────────────────────
@@ -75,14 +74,13 @@ namespace game
             _graphics = new GraphicsDeviceManager(this);
             Content.RootDirectory = "Content";
             IsMouseVisible = false;
-            _graphics.PreferredBackBufferWidth  = 1280;
+            _graphics.PreferredBackBufferWidth = 1280;
             _graphics.PreferredBackBufferHeight = 720;
             _graphics.HardwareModeSwitch = false;
-            IsFixedTimeStep  = false;
+            IsFixedTimeStep = false;
             _graphics.ApplyChanges();
         }
 
-        // ─────────────────────────────────────────────────────────────
         protected override void Initialize()
         {
             Window.AllowUserResizing = true;
@@ -90,42 +88,44 @@ namespace game
                                    GraphicsDevice.Viewport.Height;
 
             _camera = new Camera(
-                startPosition : new Vector3(0, 60, 0),
-                aspectRatio   : aspect,
+                startPosition: new Vector3(0, 60, 0),
+                aspectRatio: aspect,
                 graphicsDevice: GraphicsDevice,
-                fov           : MathHelper.ToRadians(90f),
-                nearPlane     : 0.1f,
-                farPlane      : 100000f);
+                fov: MathHelper.ToRadians(90f),
+                nearPlane: 0.1f,
+                farPlane: 100000f);
 
             _chunkManager = new ChunkManager(GraphicsDevice,
-                                             chunkSize   : 32,
+                                             chunkSize: 32,
                                              loadDistance: _loadDistance);
 
-            _solidState     = new RasterizerState { CullMode = CullMode.CullClockwiseFace, FillMode = FillMode.Solid };
+            _solidState = new RasterizerState { CullMode = CullMode.CullClockwiseFace, FillMode = FillMode.Solid };
             _wireframeState = new RasterizerState { CullMode = CullMode.CullClockwiseFace, FillMode = FillMode.WireFrame };
 
             base.Initialize();
         }
 
-        // ─────────────────────────────────────────────────────────────
         protected override void LoadContent()
         {
             _spriteBatch = new SpriteBatch(GraphicsDevice);
 
-            // ── Load our custom shader ─────────────────────────────────
-            _voxelFx     = Content.Load<Effect>("VoxelLit");   // VoxelLit.fx → Content/VoxelLit.fx
+            // ── Opaque voxel shader ───────────────────────────────────
+            _voxelFx = Content.Load<Effect>("VoxelLit");
             _voxelEffect = new VoxelLitEffect(_voxelFx);
-
-            // Initial fog settings
             _voxelEffect.FogEnabled = true;
-            _voxelEffect.FogStart   = _loadDistance * 2 * 24f;
-            _voxelEffect.FogEnd     = _loadDistance * 2 * 36f;
-
-            // Initial camera light settings
-            _voxelEffect.CameraLightEnabled   = _cameraLightEnabled;
-            _voxelEffect.CameraLightRadius    = _cameraLightRadius;
+            _voxelEffect.FogStart = _loadDistance * 2 * 24f;
+            _voxelEffect.FogEnd = _loadDistance * 2 * 36f;
+            _voxelEffect.CameraLightEnabled = _cameraLightEnabled;
+            _voxelEffect.CameraLightRadius = _cameraLightRadius;
             _voxelEffect.CameraLightIntensity = _cameraLightIntensity;
-            _voxelEffect.CameraLightColor     = new Vector3(1f, 0.92f, 0.75f);
+            _voxelEffect.CameraLightColor = new Vector3(1f, 0.92f, 0.75f);
+
+            // ── Water shader ──────────────────────────────────────────
+            _waterFx = Content.Load<Effect>("Water");   // Water.fx → Content/Water.fx
+            _waterEffect = new WaterEffect(_waterFx);
+            _waterEffect.FogEnabled = true;
+            _waterEffect.FogStart = _loadDistance * 2 * 24f;
+            _waterEffect.FogEnd = _loadDistance * 2 * 36f;
 
             _pixel = new Texture2D(GraphicsDevice, 1, 1);
             _pixel.SetData(new[] { Color.White });
@@ -134,51 +134,47 @@ namespace game
             catch { _debugFont = null; }
 
             _skyEffect = Content.Load<Effect>("Sky");
-            _skybox    = new ProceduralSkybox(GraphicsDevice, _skyEffect, startHour: 8f);
+            _skybox = new ProceduralSkybox(GraphicsDevice, _skyEffect, startHour: 8f);
 
-            // ── Demo: pre-place a glowstone block at a visible location ──
-            // Remove or move these in your actual game.
-            _emissiveBlocks.Add((new Vector3(0, 40, 0),  BlockType.Glowstone));
+            _emissiveBlocks.Add((new Vector3(0, 40, 0), BlockType.Glowstone));
             _emissiveBlocks.Add((new Vector3(-32, 68, 16), BlockType.Glowstone));
 
-            // ── Pause menu ─────────────────────────────────────────────
             var initialSettings = new GameSettings
             {
-                LoadDistance       = _loadDistance,
-                EnableVeryLowPoly  = true,
-                FogEnabled         = true,
-                FovDegrees         = 90f,
-                WireframeMode      = false,
-                DirectionalLight   = true,
-                AmbientLight       = 0.5f,
-                MoveSpeed          = _camera.MoveSpeed,
-                MouseSensitivity   = _camera.MouseSensitivity,
-                ShowDebugHud       = false,
-                // expose new settings to pause menu if desired:
-                CameraLightEnabled   = _cameraLightEnabled,
-                CameraLightRadius    = _cameraLightRadius,
+                LoadDistance = _loadDistance,
+                EnableVeryLowPoly = true,
+                FogEnabled = true,
+                FovDegrees = 90f,
+                WireframeMode = false,
+                DirectionalLight = true,
+                AmbientLight = 0.5f,
+                MoveSpeed = _camera.MoveSpeed,
+                MouseSensitivity = _camera.MouseSensitivity,
+                ShowDebugHud = false,
+                CameraLightEnabled = _cameraLightEnabled,
+                CameraLightRadius = _cameraLightRadius,
                 CameraLightIntensity = _cameraLightIntensity,
             };
 
             _pauseMenu = new PauseMenu(GraphicsDevice, _pixel, _debugFont, initialSettings);
-            _pauseMenu.OnResume           += () => { IsMouseVisible = false; };
-            _pauseMenu.OnExit             += () => Exit();
-            _pauseMenu.OnSettingsChanged  += ApplySettings;
+            _pauseMenu.OnResume += () => { IsMouseVisible = false; };
+            _pauseMenu.OnExit += () => Exit();
+            _pauseMenu.OnSettingsChanged += ApplySettings;
         }
 
-        // ─────────────────────────────────────────────────────────────
         private void ApplySettings(GameSettings s)
         {
-            _camera.MoveSpeed        = s.MoveSpeed;
+            _camera.MoveSpeed = s.MoveSpeed;
             _camera.MouseSensitivity = s.MouseSensitivity;
 
             float aspect = (float)GraphicsDevice.Viewport.Width /
                                    GraphicsDevice.Viewport.Height;
             _camera.SetFov(MathHelper.ToRadians(s.FovDegrees), aspect);
 
-            _voxelEffect.FogEnabled   = s.FogEnabled;
-            _wireframeMode            = s.WireframeMode;
-            _showDebug                = s.ShowDebugHud;
+            _voxelEffect.FogEnabled = s.FogEnabled;
+            _waterEffect.FogEnabled = s.FogEnabled;
+            _wireframeMode = s.WireframeMode;
+            _showDebug = s.ShowDebugHud;
 
             if (!s.DirectionalLight)
                 _voxelEffect.DirectionalLightEnabled = false;
@@ -186,12 +182,11 @@ namespace game
             float al = s.AmbientLight;
             _voxelEffect.AmbientLightColor = new Vector3(al, al, al);
 
-            // Camera light
-            _cameraLightEnabled           = s.CameraLightEnabled;
-            _cameraLightRadius            = s.CameraLightRadius;
-            _cameraLightIntensity         = s.CameraLightIntensity;
-            _voxelEffect.CameraLightEnabled   = _cameraLightEnabled;
-            _voxelEffect.CameraLightRadius    = _cameraLightRadius;
+            _cameraLightEnabled = s.CameraLightEnabled;
+            _cameraLightRadius = s.CameraLightRadius;
+            _cameraLightIntensity = s.CameraLightIntensity;
+            _voxelEffect.CameraLightEnabled = _cameraLightEnabled;
+            _voxelEffect.CameraLightRadius = _cameraLightRadius;
             _voxelEffect.CameraLightIntensity = _cameraLightIntensity;
 
             if (s.LoadDistance != _loadDistance || s.AoStrength != GreedyMesher.AoStrength)
@@ -199,27 +194,30 @@ namespace game
                 _loadDistance = s.LoadDistance;
                 _chunkManager.Dispose();
                 _chunkManager = new ChunkManager(GraphicsDevice,
-                                                 chunkSize   : 32,
+                                                 chunkSize: 32,
                                                  loadDistance: _loadDistance);
             }
 
-            _voxelEffect.FogStart = _loadDistance * 2 * 24f;
-            _voxelEffect.FogEnd   = _loadDistance * 2 * 36f;
+            float fs = _loadDistance * 2 * 24f;
+            float fe = _loadDistance * 2 * 36f;
+            _voxelEffect.FogStart = fs;
+            _voxelEffect.FogEnd = fe;
+            _waterEffect.FogStart = fs;
+            _waterEffect.FogEnd = fe;
 
             _chunkManager.EnableVeryLowPoly = s.EnableVeryLowPoly;
-            GreedyMesher.AoStrength         = s.AoStrength;
+            GreedyMesher.AoStrength = s.AoStrength;
         }
 
-        // ─────────────────────────────────────────────────────────────
         protected override void Update(GameTime gameTime)
         {
-            var  keys    = Keyboard.GetState();
-            bool escNow  = keys.IsKeyDown(Keys.Escape);
+            var keys = Keyboard.GetState();
+            bool escNow = keys.IsKeyDown(Keys.Escape);
 
             if (escNow && !_lastEscape)
             {
                 if (_pauseMenu.IsOpen) { _pauseMenu.Close(); IsMouseVisible = false; }
-                else                  { _pauseMenu.Open();  IsMouseVisible = true;  }
+                else { _pauseMenu.Open(); IsMouseVisible = true; }
             }
             _lastEscape = escNow;
 
@@ -241,26 +239,29 @@ namespace game
 
             _camera.Update(gameTime);
             _chunkManager.Update(_camera.Position, null);
-
             _skybox.Update(gameTime);
 
-            // ── Per-frame shader updates ───────────────────────────────
+            // ── Water time counter ────────────────────────────────────
+            _waterTime += (float)gameTime.ElapsedGameTime.TotalSeconds;
+            _waterEffect.Time = _waterTime;
 
-            // 1. Sync sun lighting from the skybox cycle
+            // ── Sync shaders from sky ─────────────────────────────────
             _voxelEffect.ApplyFromSkybox(_skybox);
+            _waterEffect.ApplyFromSkybox(_skybox);
 
-            // 2. Fog colour follows sky
             if (_voxelEffect.FogEnabled)
-                _voxelEffect.FogColor = _skybox.GetFogColor();
+            {
+                Vector3 fogCol = _skybox.GetFogColor();
+                _voxelEffect.FogColor = fogCol;
+                _waterEffect.FogColor = fogCol;
+            }
 
-            // 3. Upload camera position for the camera-light
             _voxelEffect.SetCameraPosition(_camera.Position);
+            _waterEffect.SetCameraPosition(_camera.Position);
 
-            // 4. Rebuild emissive-block point lights
-            //    (only if you add/remove blocks dynamically; otherwise do it once in LoadContent)
             UploadEmissiveLights();
 
-            // ── FPS ────────────────────────────────────────────────────
+            // ── FPS ───────────────────────────────────────────────────
             double elapsed = _frameTimer.Elapsed.TotalMilliseconds;
             _frameTimer.Restart();
             if (elapsed > 0 && elapsed < 2000)
@@ -272,38 +273,32 @@ namespace game
             {
                 double sum = 0;
                 foreach (var ft in _frameTimes) sum += ft;
-                double avgMs  = sum / _frameTimes.Count;
-                _frameMs      = (float)avgMs;
-                _smoothFps    = avgMs > 0 ? (float)(1000.0 / avgMs) : 0f;
+                double avgMs = sum / _frameTimes.Count;
+                _frameMs = (float)avgMs;
+                _smoothFps = avgMs > 0 ? (float)(1000.0 / avgMs) : 0f;
             }
 
             base.Update(gameTime);
         }
 
-        // ─────────────────────────────────────────────────────────────
-        /// <summary>
-        /// Pushes the emissive-block list to the shader.
-        /// Call once per frame (or only when the list changes for better perf).
-        /// </summary>
         private void UploadEmissiveLights()
         {
             _voxelEffect.ClearPointLights();
+            _waterEffect.ClearPointLights();
+
             foreach (var (worldPos, blockType) in _emissiveBlocks)
             {
                 if (!BlockType.IsEmissive(blockType)) continue;
                 var (color, radius, intensity) = BlockType.GetEmissiveLight(blockType);
-                // Centre of the block is at worldPos + 0.5 on each axis
-                _voxelEffect.AddPointLight(worldPos + new Vector3(0.5f, 0.5f, 0.5f),
-                                           color, radius, intensity);
+                Vector3 centre = worldPos + new Vector3(0.5f, 0.5f, 0.5f);
+                _voxelEffect.AddPointLight(centre, color, radius, intensity);
+                _waterEffect.AddPointLight(centre, color, radius, intensity);
             }
+
             _voxelEffect.UploadPointLights();
+            _waterEffect.UploadPointLights();
         }
 
-        // ── Public API to add / remove emissive blocks at runtime ─────
-        /// <summary>
-        /// Register a block as an emissive light source.
-        /// worldPos should be the block's minimum corner (same as chunk world origin + local pos).
-        /// </summary>
         public void AddEmissiveBlock(Vector3 worldPos, byte blockType)
         {
             if (BlockType.IsEmissive(blockType))
@@ -318,21 +313,23 @@ namespace game
                 (int)e.worldPos.Z == (int)worldPos.Z);
         }
 
-        // ─────────────────────────────────────────────────────────────
         protected override void Draw(GameTime gameTime)
         {
             GraphicsDevice.Clear(Color.Black);
             GraphicsDevice.DepthStencilState = DepthStencilState.Default;
-            GraphicsDevice.BlendState        = BlendState.Opaque;
+            GraphicsDevice.BlendState = BlendState.Opaque;
 
             _skybox.Draw(_camera);
 
             GraphicsDevice.DepthStencilState = DepthStencilState.Default;
-            GraphicsDevice.RasterizerState   = _wireframeMode ? _wireframeState : _solidState;
-            GraphicsDevice.BlendState        = BlendState.Opaque;
+            GraphicsDevice.BlendState = BlendState.Opaque;
 
-            // ── Set per-draw matrices ──────────────────────────────────
-            _voxelEffect.View       = _camera.ViewMatrix;
+            // ─────────────────────────────────────────────────────────
+            //  PASS 1 – Opaque geometry
+            // ─────────────────────────────────────────────────────────
+            GraphicsDevice.RasterizerState = _wireframeMode ? _wireframeState : _solidState;
+
+            _voxelEffect.View = _camera.ViewMatrix;
             _voxelEffect.Projection = _camera.ProjectionMatrix;
 
             var frustum = _camera.GetFrustum();
@@ -346,15 +343,30 @@ namespace game
             {
                 _chunkManager.Draw(_voxelEffect, frustum);
             }
+            GraphicsDevice.BlendState = BlendState.Opaque;
+            GraphicsDevice.DepthStencilState = DepthStencilState.Default;
+            GraphicsDevice.RasterizerState = new RasterizerState
+            {
+                CullMode = CullMode.None,
+                FillMode = FillMode.Solid
+            };
 
-            // ── HUD ───────────────────────────────────────────────────
+            _waterEffect.View = _camera.ViewMatrix;
+            _waterEffect.Projection = _camera.ProjectionMatrix;
+            _chunkManager.DrawWater(_waterEffect, frustum);
+
+            // Restaurar
+            GraphicsDevice.RasterizerState = _solidState;
+            // ─────────────────────────────────────────────────────────
+            //  HUD
+            // ─────────────────────────────────────────────────────────
             if (_debugFont != null)
             {
                 _spriteBatch.Begin();
                 if (!_pauseMenu.IsOpen)
                 {
                     if (_showDebug) DrawF3Hud();
-                    else            DrawMinimalHud();
+                    else DrawMinimalHud();
                 }
                 _pauseMenu.Draw(_spriteBatch);
                 _spriteBatch.End();
@@ -363,39 +375,21 @@ namespace game
             base.Draw(gameTime);
         }
 
-        // ─────────────────────────────────────────────────────────────
-        //  ChunkManager.Draw overload for VoxelLitEffect
-        //  (ChunkManager already has a Draw(BasicEffect …) method;
-        //   add this extension or duplicate the method body below)
-        // ─────────────────────────────────────────────────────────────
-        // NOTE: ChunkManager.Draw is called with _voxelEffect directly.
-        // You need to add one overload in ChunkManager that accepts
-        // VoxelLitEffect.  It is identical to the BasicEffect overload
-        // except it calls _voxelEffect.World = ... and uses
-        // _voxelEffect.CurrentTechnique.Passes[0].Apply().
-        //
-        // A minimal shim is included at the bottom of this file in a
-        // partial class extension comment so you can slot it in without
-        // touching ChunkManager.cs if you prefer.
-        // ─────────────────────────────────────────────────────────────
-
-        // ─────────────────────────────────────────────────────────────
-        //  HUD helpers  (unchanged from original)
-        // ─────────────────────────────────────────────────────────────
+        // ─── HUD helpers ──────────────────────────────────────────────
         private void DrawMinimalHud()
         {
-            int    vw     = GraphicsDevice.Viewport.Width;
-            Color  fpsCol = FpsColor(_smoothFps);
+            int vw = GraphicsDevice.Viewport.Width;
+            Color fpsCol = FpsColor(_smoothFps);
             string fpsStr = $"{_smoothFps:F0} fps";
-            Vector2 sz    = _debugFont.MeasureString(fpsStr);
+            Vector2 sz = _debugFont.MeasureString(fpsStr);
             DrawTS(fpsStr, new Vector2(vw - sz.X - 8, 8), fpsCol);
         }
 
         private void DrawF3Hud()
         {
-            Vector3  pos       = _camera.Position;
-            var      chunkPos  = _chunkManager.GetChunkCoordinates(pos);
-            var      curChunk  = _chunkManager.GetChunk(chunkPos);
+            Vector3 pos = _camera.Position;
+            var chunkPos = _chunkManager.GetChunkCoordinates(pos);
+            var curChunk = _chunkManager.GetChunk(chunkPos);
             int lx = ((int)Math.Floor(pos.X) % 32 + 32) % 32;
             int ly = ((int)Math.Floor(pos.Y) % 32 + 32) % 32;
             int lz = ((int)Math.Floor(pos.Z) % 32 + 32) % 32;
@@ -407,7 +401,7 @@ namespace game
             L.Add(("", "", CLabel));
             Color fc = FpsColor(_smoothFps);
             L.Add(("fps", $"{_smoothFps:F1}", fc));
-            L.Add(("ms",  $"{_frameMs:F2}",  fc));
+            L.Add(("ms", $"{_frameMs:F2}", fc));
             L.Add(("", "", CLabel));
             L.Add(("", "[ Position ]", CHeader));
             L.Add(("x", $"{pos.X:F3}", CValue));
@@ -422,64 +416,63 @@ namespace game
             L.Add(("cam light", _cameraLightEnabled ? $"ON  r={_cameraLightRadius:F0}" : "off",
                    _cameraLightEnabled ? CGood : CLabel));
             L.Add(("", "", CLabel));
+            L.Add(("water time", $"{_waterTime:F1}s", CValue));
+            L.Add(("", "", CLabel));
             L.Add(("wireframe", _wireframeMode ? "ON  [T]" : "off [T]",
                    _wireframeMode ? CWarn : CLabel));
 
             R.Add(("", "[ World ]", CHeader));
             R.Add(("chunk size", "32x32x32", CValue));
-            R.Add(("load dist",  $"{_loadDistance} chunks", CValue));
-            R.Add(("lod dist",   $"{_loadDistance * 4} chunks", CValue));
+            R.Add(("load dist", $"{_loadDistance} chunks", CValue));
 
             float tod = _skybox.TimeOfDay;
             int hh = (int)tod;
             int mm = (int)((tod - hh) * 60f);
             R.Add(("", "", CLabel));
             R.Add(("", "[ Time of Day ]", CHeader));
-            R.Add(("time",  $"{hh:00}:{mm:00}", CValue));
+            R.Add(("time", $"{hh:00}:{mm:00}", CValue));
             R.Add(("phase", _skybox.IsDayTime ? "day" : "night",
                    _skybox.IsDayTime ? CGood : new Color(100, 140, 255)));
 
             R.Add(("", "", CLabel));
             R.Add(("", "[ Lights ]", CHeader));
-            R.Add(("emissive blocks", $"{_emissiveBlocks.Count}", CValue));
+            R.Add(("emissive", $"{_emissiveBlocks.Count}", CValue));
 
             R.Add(("", "", CLabel));
             R.Add(("", "[ Chunks ]", CHeader));
-            int loaded  = _chunkManager.LoadedChunkCount;
-            int total   = _chunkManager.TotalChunkEntries;
-            int queued  = _chunkManager.GenerationQueueCount;
+            int loaded = _chunkManager.LoadedChunkCount;
+            int total = _chunkManager.TotalChunkEntries;
+            int queued = _chunkManager.GenerationQueueCount;
             int working = _chunkManager.ActiveGenerationTasks;
             int pending = queued + working;
-            R.Add(("loaded",   $"{loaded} / {total}", CValue));
+            R.Add(("loaded", $"{loaded} / {total}", CValue));
             R.Add(("building", $"{working}", working > 0 ? CWarn : CValue));
-            R.Add(("queued",   $"{queued}",  queued  > 200 ? CWarn : CValue));
-            R.Add(("pending",  $"{pending}", pending > 200 ? CWarn : CGood));
+            R.Add(("queued", $"{queued}", queued > 200 ? CWarn : CValue));
+            R.Add(("pending", $"{pending}", pending > 200 ? CWarn : CGood));
             R.Add(("", "", CLabel));
             R.Add(("", "[ Current Chunk ]", CHeader));
             if (curChunk != null)
             {
                 R.Add(("mesh", curChunk.HasMesh ? "ready" : "building",
                        curChunk.HasMesh ? CGood : CWarn));
+                R.Add(("water mesh", curChunk.HasWaterMesh ? "ready" : "none",
+                       curChunk.HasWaterMesh ? new Color(80, 160, 255) : CLabel));
                 if (curChunk.DebugInfo != null)
                 {
                     var di = curChunk.DebugInfo;
-                    R.Add(("verts",   $"{di.VertexCount:N0}",  CValue));
-                    R.Add(("tris",    $"{di.TriangleCount:N0}", CValue));
-                    R.Add(("gen ms",  $"{di.MeshGenerationTimeMs:F1}", CValue));
-                    R.Add(("mesh ms", $"{di.GreedyMeshingTimeMs:F1}", CValue));
+                    R.Add(("verts", $"{di.VertexCount:N0}", CValue));
+                    R.Add(("tris", $"{di.TriangleCount:N0}", CValue));
+                    R.Add(("gen ms", $"{di.MeshGenerationTimeMs:F1}", CValue));
                 }
             }
-            else
-            {
-                R.Add(("status", "not loaded", CWarn));
-            }
+            else R.Add(("status", "not loaded", CWarn));
 
-            int vw     = GraphicsDevice.Viewport.Width;
-            int leftH  = L.Count * LineH + PadY * 2;
+            int vw = GraphicsDevice.Viewport.Width;
+            int leftH = L.Count * LineH + PadY * 2;
             int rightH = R.Count * LineH + PadY * 2;
 
-            DrawPanel(PadX - 2,               PadY - 2, ColW + 4, leftH  + 4);
-            DrawPanel(vw - ColW - PadX - 2,   PadY - 2, ColW + 4, rightH + 4);
+            DrawPanel(PadX - 2, PadY - 2, ColW + 4, leftH + 4);
+            DrawPanel(vw - ColW - PadX - 2, PadY - 2, ColW + 4, rightH + 4);
 
             int y = PadY;
             foreach (var (lbl, val, col) in L) { DrawLine(PadX, y, lbl, val, col); y += LineH; }
@@ -493,7 +486,7 @@ namespace game
         {
             if (string.IsNullOrEmpty(lbl)) { DrawTS(val, new Vector2(x, y), col); return; }
             string ls = lbl + ": ";
-            DrawTS(ls,  new Vector2(x, y), CLabel);
+            DrawTS(ls, new Vector2(x, y), CLabel);
             DrawTS(val, new Vector2(x + _debugFont.MeasureString(ls).X, y), col);
         }
 
@@ -508,13 +501,13 @@ namespace game
 
         private void DrawCrosshair()
         {
-            int cx = GraphicsDevice.Viewport.Width  / 2;
+            int cx = GraphicsDevice.Viewport.Width / 2;
             int cy = GraphicsDevice.Viewport.Height / 2;
             const int s = 7, t = 1;
             _spriteBatch.Draw(_pixel, new Rectangle(cx - s - 1, cy - t - 1, s * 2 + 2, t * 2 + 3), Color.Black * 0.5f);
             _spriteBatch.Draw(_pixel, new Rectangle(cx - t - 1, cy - s - 1, t * 2 + 3, s * 2 + 2), Color.Black * 0.5f);
-            _spriteBatch.Draw(_pixel, new Rectangle(cx - s,     cy - t,     s * 2,     t * 2 + 1), Color.White * 0.9f);
-            _spriteBatch.Draw(_pixel, new Rectangle(cx - t,     cy - s,     t * 2 + 1, s * 2    ), Color.White * 0.9f);
+            _spriteBatch.Draw(_pixel, new Rectangle(cx - s, cy - t, s * 2, t * 2 + 1), Color.White * 0.9f);
+            _spriteBatch.Draw(_pixel, new Rectangle(cx - t, cy - s, t * 2 + 1, s * 2), Color.White * 0.9f);
         }
 
         private static Color FpsColor(float fps)
@@ -526,8 +519,10 @@ namespace game
             {
                 _chunkManager?.Dispose();
                 _voxelEffect?.Dispose();
+                _waterEffect?.Dispose();
                 _skybox?.Dispose();
                 _skyEffect?.Dispose();
+                _waterFx?.Dispose();
                 _spriteBatch?.Dispose();
                 _pixel?.Dispose();
             }

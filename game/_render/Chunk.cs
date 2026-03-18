@@ -1,6 +1,7 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using System;
+
 namespace game
 {
     public class Chunk
@@ -14,39 +15,31 @@ namespace game
         private bool _isDirty;
         private bool _isMeshBuilding;
 
+        // ── Opaque mesh ────────────────────────────────────────────────
         private VertexPositionNormalColor[] _vertices;
         private ushort[] _indices;
         private VertexBuffer _vertexBuffer;
         private IndexBuffer _indexBuffer;
 
+        // ── Water / transparent mesh ───────────────────────────────────
+        private VertexPositionNormalColor[] _waterVertices;
+        private ushort[] _waterIndices;
+        private VertexBuffer _waterVertexBuffer;
+        private IndexBuffer _waterIndexBuffer;
+
         private BoundingBox _boundingBox;
-
         private ChunkDebugInfo _debugInfo;
-
         private readonly object _meshLock = new object();
 
         public Chunk(int x, int y, int z, int size = 16)
         {
-            X = x;
-            Y = y;
-            Z = z;
+            X = x; Y = y; Z = z;
             _size = size;
-
-
             _blocks = new byte[size, size, size];
             Array.Clear(_blocks, 0, _blocks.Length);
-
             _isDirty = true;
-            _isMeshBuilding = false;
-            _vertices = null;
-            _indices = null;
-            _vertexBuffer = null;
-            _indexBuffer = null;
-
             UpdateBoundingBox();
         }
-
-
 
         public byte GetBlock(int x, int y, int z)
         {
@@ -55,91 +48,59 @@ namespace game
             return _blocks[x, y, z];
         }
 
-
-
         public void SetBlock(int x, int y, int z, byte blockType)
         {
             if (x < 0 || x >= _size || y < 0 || y >= _size || z < 0 || z >= _size)
                 return;
-            if (_blocks[x, y, z] != blockType)
-            {
-                _blocks[x, y, z] = blockType;
-                _isDirty = true;
-            }
+            if (_blocks[x, y, z] != blockType) { _blocks[x, y, z] = blockType; _isDirty = true; }
         }
 
-
-        public byte[,,] GetBlocks()
-        {
-            return _blocks;
-        }
-
+        public byte[,,] GetBlocks() => _blocks;
 
         public void SetBlocks(byte[,,] blocks)
         {
-            if (blocks.GetLength(0) != _size ||
-                blocks.GetLength(1) != _size ||
-                blocks.GetLength(2) != _size)
-            {
+            if (blocks.GetLength(0) != _size || blocks.GetLength(1) != _size || blocks.GetLength(2) != _size)
                 throw new ArgumentException("Tamaño de bloque incorrecto");
-            }
             _blocks = (byte[,,])blocks.Clone();
             _isDirty = true;
         }
 
-
-
         public bool IsDirty => _isDirty;
-
-
         public bool IsMeshBuilding => _isMeshBuilding;
-
-
         public bool HasMesh => _vertexBuffer != null && _indices != null;
-
-
+        public bool HasWaterMesh => _waterVertexBuffer != null && _waterIndices != null;
         public ChunkDebugInfo DebugInfo => _debugInfo;
 
-
-        public void MarkDirty()
-        {
-            _isDirty = true;
-        }
-
+        public void MarkDirty() => _isDirty = true;
 
         public void MarkMeshBuildStart()
         {
-            lock (_meshLock)
-            {
-                _isMeshBuilding = true;
-                _isDirty = false;
-            }
+            lock (_meshLock) { _isMeshBuilding = true; _isDirty = false; }
         }
 
+        public void MarkMeshEmpty() => _isMeshBuilding = false;
 
-
-        public void MarkMeshEmpty()
-        {
-            _isMeshBuilding = false;
-        }
-
-
-
-
-        public void SetMeshData(VertexPositionNormalColor[] vertices, ushort[] indices, GraphicsDevice graphicsDevice, ChunkDebugInfo debugInfo = null)
+        // ── Upload both meshes atomically ──────────────────────────────
+        public void SetMeshData(
+            VertexPositionNormalColor[] vertices, ushort[] indices,
+            VertexPositionNormalColor[] waterVerts, ushort[] waterIdx,
+            GraphicsDevice graphicsDevice,
+            ChunkDebugInfo debugInfo = null)
         {
             lock (_meshLock)
             {
+                // ---- opaque ----
                 _vertices = vertices;
                 _indices = indices;
                 _debugInfo = debugInfo ?? new ChunkDebugInfo();
-
                 _debugInfo.VertexCount = vertices?.Length ?? 0;
                 _debugInfo.IndexCount = indices?.Length ?? 0;
                 _debugInfo.LastMeshGenerationTime = DateTime.Now;
 
                 _vertexBuffer?.Dispose();
                 _indexBuffer?.Dispose();
+                _vertexBuffer = null;
+                _indexBuffer = null;
 
                 if (_vertices != null && _vertices.Length > 0 && _indices != null && _indices.Length > 0)
                 {
@@ -150,63 +111,84 @@ namespace game
                         _indices.Length, BufferUsage.WriteOnly);
                     _indexBuffer.SetData(_indices);
                 }
+
+                // ---- water ----
+                _waterVertices = waterVerts;
+                _waterIndices = waterIdx;
+
+                _waterVertexBuffer?.Dispose();
+                _waterIndexBuffer?.Dispose();
+                _waterVertexBuffer = null;
+                _waterIndexBuffer = null;
+
+                if (_waterVertices != null && _waterVertices.Length > 0 &&
+                    _waterIndices != null && _waterIndices.Length > 0)
+                {
+                    _waterVertexBuffer = new VertexBuffer(graphicsDevice, VertexPositionNormalColor.VertexDeclaration,
+                        _waterVertices.Length, BufferUsage.WriteOnly);
+                    _waterVertexBuffer.SetData(_waterVertices);
+                    _waterIndexBuffer = new IndexBuffer(graphicsDevice, typeof(ushort),
+                        _waterIndices.Length, BufferUsage.WriteOnly);
+                    _waterIndexBuffer.SetData(_waterIndices);
+                }
+
                 _isMeshBuilding = false;
             }
         }
 
+        // ── Legacy overload (opaque-only) kept for compatibility ───────
+        public void SetMeshData(VertexPositionNormalColor[] vertices, ushort[] indices,
+            GraphicsDevice graphicsDevice, ChunkDebugInfo debugInfo = null)
+            => SetMeshData(vertices, indices, null, null, graphicsDevice, debugInfo);
 
+        // ── Draw opaque geometry ───────────────────────────────────────
         public void Draw(GraphicsDevice graphicsDevice, BoundingFrustum cameraFrustum)
         {
-
-
-
-
             lock (_meshLock)
             {
-                if (_vertexBuffer == null || _indexBuffer == null)
-                    return;
+                if (_vertexBuffer == null || _indexBuffer == null) return;
                 graphicsDevice.SetVertexBuffer(_vertexBuffer);
                 graphicsDevice.Indices = _indexBuffer;
-
-                graphicsDevice.DrawIndexedPrimitives(
-                    PrimitiveType.TriangleList,
-                    baseVertex: 0,
-                    startIndex: 0,
-                    primitiveCount: _indices.Length / 3);
+                graphicsDevice.DrawIndexedPrimitives(PrimitiveType.TriangleList,
+                    0, 0, _indices.Length / 3);
             }
         }
 
-
+        // ── Draw water geometry ────────────────────────────────────────
+        public void DrawWater(GraphicsDevice graphicsDevice, BoundingFrustum cameraFrustum)
+        {
+            lock (_meshLock)
+            {
+                if (_waterVertexBuffer == null || _waterIndexBuffer == null) return;
+                graphicsDevice.SetVertexBuffer(_waterVertexBuffer);
+                graphicsDevice.Indices = _waterIndexBuffer;
+                graphicsDevice.DrawIndexedPrimitives(PrimitiveType.TriangleList,
+                    0, 0, _waterIndices.Length / 3);
+            }
+        }
 
         private void UpdateBoundingBox()
         {
             Vector3 min = new Vector3(X * _size, Y * _size, Z * _size);
-            Vector3 max = min + new Vector3(_size, _size, _size);
-            _boundingBox = new BoundingBox(min, max);
+            _boundingBox = new BoundingBox(min, min + new Vector3(_size));
         }
-
 
         public BoundingBox GetBoundingBox() => _boundingBox;
 
-
         public float GetDistanceTo(Vector3 point)
         {
-            Vector3 chunkCenter = new Vector3(
-                (X * _size) + _size / 2f,
-                (Y * _size) + _size / 2f,
-                (Z * _size) + _size / 2f);
-            return Vector3.Distance(point, chunkCenter);
+            Vector3 c = new Vector3(X * _size + _size / 2f, Y * _size + _size / 2f, Z * _size + _size / 2f);
+            return Vector3.Distance(point, c);
         }
-
 
         public void Dispose()
         {
             lock (_meshLock)
             {
-                _vertexBuffer?.Dispose();
-                _indexBuffer?.Dispose();
+                _vertexBuffer?.Dispose(); _indexBuffer?.Dispose();
+                _waterVertexBuffer?.Dispose(); _waterIndexBuffer?.Dispose();
                 _vertexBuffer = null;
-                _indexBuffer = null;
+                _waterVertexBuffer = null;
             }
         }
     }

@@ -4,22 +4,25 @@ namespace game
 {
     public static class BlockType
     {
-        public const byte Air    = 0;
-        public const byte Stone  = 1;
-        public const byte Dirt   = 2;
-        public const byte Grass  = 3;
-        public const byte Sand   = 4;
-        public const byte Water  = 5;
-        public const byte Wood   = 6;
-        public const byte Snow   = 7;
-        public const byte Leaves = 8;
-        public const byte Glowstone = 9;  
+        public const byte Air       = 0;
+        public const byte Stone     = 1;
+        public const byte Dirt      = 2;
+        public const byte Grass     = 3;
+        public const byte Sand      = 4;
+        public const byte Water     = 5;
+        public const byte Wood      = 6;
+        public const byte Snow      = 7;
+        public const byte Leaves    = 8;
+        public const byte Glowstone = 9;
 
         public static bool IsSolid(byte blockType)
             => blockType != Air && blockType != Water;
 
         public static bool IsTransparent(byte blockType)
             => blockType == Air || blockType == Water;
+
+        /// <summary>Returns true for blocks that need the transparent/water render pass.</summary>
+        public static bool IsWater(byte blockType) => blockType == Water;
 
         public static Color GetBlockColor(byte blockType)
         {
@@ -31,9 +34,10 @@ namespace game
                 Leaves    => new Color( 24, 109,  44),
                 Snow      => new Color(255, 255, 255),
                 Sand      => new Color(238, 214, 175),
-                Water     => new Color( 65, 105, 225),
+                // Water base color – alpha 200 for semi-transparency hint in vertex color
+                Water     => new Color( 40,  90, 210, 200),
                 Wood      => new Color(101,  67,  33),
-                Glowstone => new Color(255, 220, 100), 
+                Glowstone => new Color(255, 220, 100),
                 _         => new Color(255,   0, 255)
             };
         }

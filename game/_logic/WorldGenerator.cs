@@ -7,8 +7,8 @@ namespace game
     public class WorldGenerator
     {
         private readonly int _seed;
-        private const int SeaLevel = 22;
-        private const int BaseHeight = 22;
+        private const int SeaLevel = 20;
+        private const int BaseHeight = 20;
         private const int MaxHeight = 160;
         private const int MinHeight = 2;
         private const float CaveThreshold = 0.62f;
@@ -395,14 +395,18 @@ namespace game
                 float cave = (OctaveNoise3D(wx, wy, wz, 40f, 2, 0.5f, _seed + 99) + 1f) * 0.5f;
                 if (cave > CaveThreshold) return BlockType.Air;
             }
-            if (wy == terrainH) return GetSurfaceBlock(biome, isRiver, terrainH);
+            if (wy == terrainH)
+            {
+                if(wy != SeaLevel) return GetSurfaceBlock(biome, isRiver, terrainH);
+                else return BlockType.Water;
+            }
             if (wy >= terrainH - 3)
             {
                 return biome switch
                 {
                     BiomeType.Desert => BlockType.Sand,
                     BiomeType.Ocean => BlockType.Stone,
-                    _ => terrainH <= SeaLevel ? BlockType.Sand : BlockType.Dirt
+                    _ => terrainH < SeaLevel ? BlockType.Sand : terrainH > SeaLevel ? BlockType.Dirt : BlockType.Water
                 };
             }
             return BlockType.Stone;
