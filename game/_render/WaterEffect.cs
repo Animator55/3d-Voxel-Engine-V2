@@ -19,94 +19,131 @@ namespace game
         private readonly EffectParameter _pFresnelBias, _pFresnelScale, _pFresnelPow;
         private readonly EffectParameter _pPLPos, _pPLCol, _pPLRad, _pPLInt, _pPLCount;
         private readonly EffectParameter _pSkyZenith, _pSkyHorizon, _pSunColor, _pSunSharpness, _pSunStr;
+        // en la clase, junto a los otros EffectParameter privados:
+        private readonly EffectParameter _pCamLightEnabled, _pCamLightRadius,
+                                        _pCamLightIntensity, _pCamLightColor;
 
         private const int MAX_LIGHTS = 8;
         private readonly Vector3[] _plPos = new Vector3[MAX_LIGHTS];
         private readonly Vector3[] _plCol = new Vector3[MAX_LIGHTS];
-        private readonly float[]   _plRad = new float[MAX_LIGHTS];
-        private readonly float[]   _plInt = new float[MAX_LIGHTS];
+        private readonly float[] _plRad = new float[MAX_LIGHTS];
+        private readonly float[] _plInt = new float[MAX_LIGHTS];
         private int _plCount;
 
-        private Matrix  _world, _view, _proj;
-        private float   _time;
+        private Matrix _world, _view, _proj;
+        private float _time;
         private Vector3 _ambientLightColor;
-        private bool    _dirEnabled;
+        private bool _dirEnabled;
         private Vector3 _dirDir, _dirColor;
-        private bool    _fogEnabled;
-        private float   _fogStart, _fogEnd;
+        private bool _fogEnabled;
+        private float _fogStart, _fogEnd;
         private Vector3 _fogColor;
-        private float   _waveHeight, _waveSpeed;
-        private float   _waterAlpha, _specPow, _specStr;
-        private float   _fresnelBias, _fresnelScale, _fresnelPow;
+        private float _waveHeight, _waveSpeed;
+        private float _waterAlpha, _specPow, _specStr;
+        private float _fresnelBias, _fresnelScale, _fresnelPow;
+        private bool _camLightEnabled;
+        private float _camLightRadius, _camLightIntensity;
+        private Vector3 _camLightColor;
 
         public WaterEffect(Effect fx)
         {
             _fx = fx ?? throw new ArgumentNullException(nameof(fx));
 
             _pWorld = P("World");
-            _pView  = P("View");
-            _pProj  = P("Projection");
-            _pTime  = P("Time");
+            _pView = P("View");
+            _pProj = P("Projection");
+            _pTime = P("Time");
 
-            _pDirLightDir   = P("DirectionalLightDir");
+            _pDirLightDir = P("DirectionalLightDir");
             _pDirLightColor = P("DirectionalLightColor");
-            _pAmbient       = P("AmbientLightColor");
-            _pDirEnabled    = P("DirectionalLightEnabled");
+            _pAmbient = P("AmbientLightColor");
+            _pDirEnabled = P("DirectionalLightEnabled");
 
             _pFogEnabled = P("FogEnabled");
-            _pFogStart   = P("FogStart");
-            _pFogEnd     = P("FogEnd");
-            _pFogColor   = P("FogColor");
+            _pFogStart = P("FogStart");
+            _pFogEnd = P("FogEnd");
+            _pFogColor = P("FogColor");
 
-            _pCameraPos    = P("CameraPosition");
-            _pWaveHeight   = P("WaveHeight");
-            _pWaveSpeed    = P("WaveSpeed");
-            _pWaterAlpha   = P("WaterAlpha");
-            _pSpecPow      = P("SpecularPower");
-            _pSpecStr      = P("SpecularStr");
-            _pFresnelBias  = P("FresnelBias");
+
+            _pCamLightEnabled = P("CameraLightEnabled");
+            _pCamLightRadius = P("CameraLightRadius");
+            _pCamLightIntensity = P("CameraLightIntensity");
+            _pCamLightColor = P("CameraLightColor");
+
+            _pCameraPos = P("CameraPosition");
+            _pWaveHeight = P("WaveHeight");
+            _pWaveSpeed = P("WaveSpeed");
+            _pWaterAlpha = P("WaterAlpha");
+            _pSpecPow = P("SpecularPower");
+            _pSpecStr = P("SpecularStr");
+            _pFresnelBias = P("FresnelBias");
             _pFresnelScale = P("FresnelScale");
-            _pFresnelPow   = P("FresnelPow");
+            _pFresnelPow = P("FresnelPow");
 
-            _pPLPos   = P("PointLightPositions");
-            _pPLCol   = P("PointLightColors");
-            _pPLRad   = P("PointLightRadii");
-            _pPLInt   = P("PointLightIntensities");
+            _pPLPos = P("PointLightPositions");
+            _pPLCol = P("PointLightColors");
+            _pPLRad = P("PointLightRadii");
+            _pPLInt = P("PointLightIntensities");
             _pPLCount = P("PointLightCount");
 
-            _pSkyZenith    = P("SkyColorZenith");
-            _pSkyHorizon   = P("SkyColorHorizon");
-            _pSunColor     = P("SunColor");
+            _pSkyZenith = P("SkyColorZenith");
+            _pSkyHorizon = P("SkyColorHorizon");
+            _pSunColor = P("SunColor");
             _pSunSharpness = P("SunSharpness");
-            _pSunStr       = P("SunStr");
+            _pSunStr = P("SunStr");
 
             // Defaults
-            WaveHeight    = 0.08f;
-            WaveSpeed     = 0.6f;
-            WaterAlpha    = 1.0f;
+            WaveHeight = 0.08f;
+            WaveSpeed = 0.6f;
+            WaterAlpha = 1.0f;
             SpecularPower = 120f;
-            SpecularStr   = 2.2f;
-            FresnelBias   = 0.08f;
-            FresnelScale  = 0.92f;
-            FresnelPow    = 3.0f;
+            SpecularStr = 2.2f;
+            FresnelBias = 0.08f;
+            FresnelScale = 0.92f;
+            FresnelPow = 3.0f;
 
-            AmbientLightColor       = new Vector3(0.4f, 0.4f, 0.4f);
+
+            CameraLightEnabled = true;
+            CameraLightRadius = 18f;
+            CameraLightIntensity = 1.4f;
+            CameraLightColor = new Vector3(1f, 0.92f, 0.75f);
+
+            AmbientLightColor = new Vector3(0.4f, 0.4f, 0.4f);
             DirectionalLightEnabled = true;
-            DirectionalLightDir     = Vector3.Normalize(new Vector3(0.6f, 1f, 0.4f));
-            DirectionalLightColor   = new Vector3(1f, 0.95f, 0.85f);
+            DirectionalLightDir = Vector3.Normalize(new Vector3(0.6f, 1f, 0.4f));
+            DirectionalLightColor = new Vector3(1f, 0.95f, 0.85f);
 
             FogEnabled = true;
-            FogStart   = 200f;
-            FogEnd     = 400f;
-            FogColor   = new Vector3(0.5f, 0.7f, 1f);
+            FogStart = 200f;
+            FogEnd = 400f;
+            FogColor = new Vector3(0.5f, 0.7f, 1f);
 
-            _pSkyZenith   ?.SetValue(new Vector3(0.10f, 0.40f, 0.85f));
-            _pSkyHorizon  ?.SetValue(new Vector3(0.50f, 0.72f, 1.00f));
-            _pSunColor    ?.SetValue(new Vector3(1.0f,  0.95f, 0.80f));
+            _pSkyZenith?.SetValue(new Vector3(0.10f, 0.40f, 0.85f));
+            _pSkyHorizon?.SetValue(new Vector3(0.50f, 0.72f, 1.00f));
+            _pSunColor?.SetValue(new Vector3(1.0f, 0.95f, 0.80f));
             _pSunSharpness?.SetValue(320f);
-            _pSunStr      ?.SetValue(3.5f);
+            _pSunStr?.SetValue(3.5f);
         }
-
+        public bool CameraLightEnabled
+        {
+            get => _camLightEnabled;
+            set { _camLightEnabled = value; _pCamLightEnabled?.SetValue(value); }
+        }
+        public float CameraLightRadius
+        {
+            get => _camLightRadius;
+            set { _camLightRadius = value; _pCamLightRadius?.SetValue(value); }
+        }
+        public float CameraLightIntensity
+        {
+            get => _camLightIntensity;
+            set { _camLightIntensity = value; _pCamLightIntensity?.SetValue(value); }
+        }
+        public Vector3 CameraLightColor
+        {
+            get => _camLightColor;
+            set { _camLightColor = value; _pCamLightColor?.SetValue(value); }
+        }
         public Matrix World
         {
             get => _world;
@@ -219,44 +256,44 @@ namespace game
             Vector3 sunDir = sky.GetSunDirection();
             DirectionalLightDir = sunDir;
 
-            float sunH      = sunDir.Y;
-            float dayFactor    = Smoothstep(-0.25f, 0.30f, sunH);
+            float sunH = sunDir.Y;
+            float dayFactor = Smoothstep(-0.25f, 0.30f, sunH);
             float sunsetFactor = Smoothstep(-0.30f, 0.02f, sunH)
-                               * Smoothstep( 0.45f, 0.05f, sunH);
+                               * Smoothstep(0.45f, 0.05f, sunH);
 
             // Ambient
-            Vector3 ambDay    = new Vector3(0.55f, 0.58f, 0.65f);
+            Vector3 ambDay = new Vector3(0.55f, 0.58f, 0.65f);
             Vector3 ambSunset = new Vector3(0.45f, 0.28f, 0.18f);
-            Vector3 ambNight  = new Vector3(0.10f, 0.10f, 0.15f);
-            Vector3 ambient   = Vector3.Lerp(ambNight,  ambDay,    dayFactor);
-            ambient           = Vector3.Lerp(ambient,   ambSunset, sunsetFactor);
+            Vector3 ambNight = new Vector3(0.10f, 0.10f, 0.15f);
+            Vector3 ambient = Vector3.Lerp(ambNight, ambDay, dayFactor);
+            ambient = Vector3.Lerp(ambient, ambSunset, sunsetFactor);
             AmbientLightColor = ambient;
 
             // Diffuse
-            Vector3 diffDay    = new Vector3(0.90f, 0.88f, 0.80f);
+            Vector3 diffDay = new Vector3(0.90f, 0.88f, 0.80f);
             Vector3 diffSunset = new Vector3(1.00f, 0.55f, 0.20f);
-            Vector3 diff       = Vector3.Lerp(Vector3.Zero, diffDay,    dayFactor);
-            diff               = Vector3.Lerp(diff,         diffSunset, sunsetFactor * 0.8f);
-            DirectionalLightColor   = diff;
+            Vector3 diff = Vector3.Lerp(Vector3.Zero, diffDay, dayFactor);
+            diff = Vector3.Lerp(diff, diffSunset, sunsetFactor * 0.8f);
+            DirectionalLightColor = diff;
             DirectionalLightEnabled = sunH > -0.25f;
 
             // Sky reflection colors
-            Vector3 zenithDay    = new Vector3(0.10f, 0.40f, 0.85f);
+            Vector3 zenithDay = new Vector3(0.10f, 0.40f, 0.85f);
             Vector3 zenithSunset = new Vector3(0.55f, 0.25f, 0.15f);
-            Vector3 zenithNight  = new Vector3(0.03f, 0.05f, 0.15f);
-            Vector3 zenith = Vector3.Lerp(zenithNight, zenithDay,    dayFactor);
-            zenith         = Vector3.Lerp(zenith,      zenithSunset, sunsetFactor);
+            Vector3 zenithNight = new Vector3(0.03f, 0.05f, 0.15f);
+            Vector3 zenith = Vector3.Lerp(zenithNight, zenithDay, dayFactor);
+            zenith = Vector3.Lerp(zenith, zenithSunset, sunsetFactor);
 
-            Vector3 horizDay    = new Vector3(0.50f, 0.72f, 1.00f);
+            Vector3 horizDay = new Vector3(0.50f, 0.72f, 1.00f);
             Vector3 horizSunset = new Vector3(0.95f, 0.45f, 0.15f);
-            Vector3 horizNight  = new Vector3(0.05f, 0.08f, 0.20f);
-            Vector3 horiz = Vector3.Lerp(horizNight, horizDay,    dayFactor);
-            horiz         = Vector3.Lerp(horiz,      horizSunset, sunsetFactor);
+            Vector3 horizNight = new Vector3(0.05f, 0.08f, 0.20f);
+            Vector3 horiz = Vector3.Lerp(horizNight, horizDay, dayFactor);
+            horiz = Vector3.Lerp(horiz, horizSunset, sunsetFactor);
 
-            _pSkyZenith ?.SetValue(zenith);
+            _pSkyZenith?.SetValue(zenith);
             _pSkyHorizon?.SetValue(horiz);
-            _pSunStr    ?.SetValue(2.5f + sunsetFactor * 1.5f);
-            _pSunColor  ?.SetValue(DirectionalLightColor);
+            _pSunStr?.SetValue(2.5f + sunsetFactor * 1.5f);
+            _pSunColor?.SetValue(DirectionalLightColor);
 
             FogColor = sky.GetFogColor();
         }
@@ -281,10 +318,10 @@ namespace game
 
         public void UploadPointLights()
         {
-            _pPLPos  ?.SetValue(_plPos);
-            _pPLCol  ?.SetValue(_plCol);
-            _pPLRad  ?.SetValue(_plRad);
-            _pPLInt  ?.SetValue(_plInt);
+            _pPLPos?.SetValue(_plPos);
+            _pPLCol?.SetValue(_plCol);
+            _pPLRad?.SetValue(_plRad);
+            _pPLInt?.SetValue(_plInt);
             _pPLCount?.SetValue(_plCount);
         }
 

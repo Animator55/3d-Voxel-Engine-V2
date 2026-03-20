@@ -395,11 +395,8 @@ namespace game
                 float cave = (OctaveNoise3D(wx, wy, wz, 40f, 2, 0.5f, _seed + 99) + 1f) * 0.5f;
                 if (cave > CaveThreshold) return BlockType.Air;
             }
-            if (wy == terrainH)
-            {
-                if(wy != SeaLevel) return GetSurfaceBlock(biome, isRiver, terrainH);
-                else return BlockType.Water;
-            }
+            if (wy == terrainH) return GetSurfaceBlock(biome, isRiver, terrainH);
+
             if (wy >= terrainH - 3)
             {
                 return biome switch

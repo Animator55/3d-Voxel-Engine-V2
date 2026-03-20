@@ -21,11 +21,17 @@ namespace game
         private VertexBuffer _vertexBuffer;
         private IndexBuffer _indexBuffer;
 
-        // ── Water / transparent mesh ───────────────────────────────────
+        // ── Water / transparent mesh (océano ≤ SeaLevel) ──────────────
         private VertexPositionNormalColor[] _waterVertices;
         private ushort[] _waterIndices;
         private VertexBuffer _waterVertexBuffer;
         private IndexBuffer _waterIndexBuffer;
+
+        // ── River / opaque-water mesh (ríos y cascadas > SeaLevel) ────
+        private VertexPositionNormalColor[] _riverVertices;
+        private ushort[] _riverIndices;
+        private VertexBuffer _riverVertexBuffer;
+        private IndexBuffer _riverIndexBuffer;
 
         private BoundingBox _boundingBox;
         private ChunkDebugInfo _debugInfo;
@@ -65,10 +71,11 @@ namespace game
             _isDirty = true;
         }
 
-        public bool IsDirty => _isDirty;
+        public bool IsDirty        => _isDirty;
         public bool IsMeshBuilding => _isMeshBuilding;
-        public bool HasMesh => _vertexBuffer != null && _indices != null;
-        public bool HasWaterMesh => _waterVertexBuffer != null && _waterIndices != null;
+        public bool HasMesh        => _vertexBuffer      != null && _indices      != null;
+        public bool HasWaterMesh   => _waterVertexBuffer != null && _waterIndices != null;
+        public bool HasRiverMesh   => _riverVertexBuffer != null && _riverIndices != null;
         public ChunkDebugInfo DebugInfo => _debugInfo;
 
         public void MarkDirty() => _isDirty = true;
@@ -80,10 +87,11 @@ namespace game
 
         public void MarkMeshEmpty() => _isMeshBuilding = false;
 
-        // ── Upload both meshes atomically ──────────────────────────────
+        // ── Upload opaque + water + river meshes atomically ────────────
         public void SetMeshData(
-            VertexPositionNormalColor[] vertices, ushort[] indices,
-            VertexPositionNormalColor[] waterVerts, ushort[] waterIdx,
+            VertexPositionNormalColor[] vertices,    ushort[] indices,
+            VertexPositionNormalColor[] waterVerts,  ushort[] waterIdx,
+            VertexPositionNormalColor[] riverVerts,  ushort[] riverIdx,
             GraphicsDevice graphicsDevice,
             ChunkDebugInfo debugInfo = null)
         {
@@ -91,20 +99,21 @@ namespace game
             {
                 // ---- opaque ----
                 _vertices = vertices;
-                _indices = indices;
+                _indices  = indices;
                 _debugInfo = debugInfo ?? new ChunkDebugInfo();
                 _debugInfo.VertexCount = vertices?.Length ?? 0;
-                _debugInfo.IndexCount = indices?.Length ?? 0;
+                _debugInfo.IndexCount  = indices?.Length  ?? 0;
                 _debugInfo.LastMeshGenerationTime = DateTime.Now;
 
                 _vertexBuffer?.Dispose();
                 _indexBuffer?.Dispose();
                 _vertexBuffer = null;
-                _indexBuffer = null;
+                _indexBuffer  = null;
 
                 if (_vertices != null && _vertices.Length > 0 && _indices != null && _indices.Length > 0)
                 {
-                    _vertexBuffer = new VertexBuffer(graphicsDevice, VertexPositionNormalColor.VertexDeclaration,
+                    _vertexBuffer = new VertexBuffer(graphicsDevice,
+                        VertexPositionNormalColor.VertexDeclaration,
                         _vertices.Length, BufferUsage.WriteOnly);
                     _vertexBuffer.SetData(_vertices);
                     _indexBuffer = new IndexBuffer(graphicsDevice, typeof(ushort),
@@ -112,19 +121,20 @@ namespace game
                     _indexBuffer.SetData(_indices);
                 }
 
-                // ---- water ----
+                // ---- water (transparente, océano) ----
                 _waterVertices = waterVerts;
-                _waterIndices = waterIdx;
+                _waterIndices  = waterIdx;
 
                 _waterVertexBuffer?.Dispose();
                 _waterIndexBuffer?.Dispose();
                 _waterVertexBuffer = null;
-                _waterIndexBuffer = null;
+                _waterIndexBuffer  = null;
 
                 if (_waterVertices != null && _waterVertices.Length > 0 &&
-                    _waterIndices != null && _waterIndices.Length > 0)
+                    _waterIndices  != null && _waterIndices.Length  > 0)
                 {
-                    _waterVertexBuffer = new VertexBuffer(graphicsDevice, VertexPositionNormalColor.VertexDeclaration,
+                    _waterVertexBuffer = new VertexBuffer(graphicsDevice,
+                        VertexPositionNormalColor.VertexDeclaration,
                         _waterVertices.Length, BufferUsage.WriteOnly);
                     _waterVertexBuffer.SetData(_waterVertices);
                     _waterIndexBuffer = new IndexBuffer(graphicsDevice, typeof(ushort),
@@ -132,14 +142,44 @@ namespace game
                     _waterIndexBuffer.SetData(_waterIndices);
                 }
 
+                // ---- river (opaco, ríos/cascadas sobre SeaLevel) ----
+                _riverVertices = riverVerts;
+                _riverIndices  = riverIdx;
+
+                _riverVertexBuffer?.Dispose();
+                _riverIndexBuffer?.Dispose();
+                _riverVertexBuffer = null;
+                _riverIndexBuffer  = null;
+
+                if (_riverVertices != null && _riverVertices.Length > 0 &&
+                    _riverIndices  != null && _riverIndices.Length  > 0)
+                {
+                    _riverVertexBuffer = new VertexBuffer(graphicsDevice,
+                        VertexPositionNormalColor.VertexDeclaration,
+                        _riverVertices.Length, BufferUsage.WriteOnly);
+                    _riverVertexBuffer.SetData(_riverVertices);
+                    _riverIndexBuffer = new IndexBuffer(graphicsDevice, typeof(ushort),
+                        _riverIndices.Length, BufferUsage.WriteOnly);
+                    _riverIndexBuffer.SetData(_riverIndices);
+                }
+
                 _isMeshBuilding = false;
             }
         }
 
-        // ── Legacy overload (opaque-only) kept for compatibility ───────
-        public void SetMeshData(VertexPositionNormalColor[] vertices, ushort[] indices,
-            GraphicsDevice graphicsDevice, ChunkDebugInfo debugInfo = null)
-            => SetMeshData(vertices, indices, null, null, graphicsDevice, debugInfo);
+        // ── Legacy overloads para compatibilidad ───────────────────────
+        public void SetMeshData(
+            VertexPositionNormalColor[] vertices,   ushort[] indices,
+            VertexPositionNormalColor[] waterVerts, ushort[] waterIdx,
+            GraphicsDevice graphicsDevice,
+            ChunkDebugInfo debugInfo = null)
+            => SetMeshData(vertices, indices, waterVerts, waterIdx, null, null, graphicsDevice, debugInfo);
+
+        public void SetMeshData(
+            VertexPositionNormalColor[] vertices, ushort[] indices,
+            GraphicsDevice graphicsDevice,
+            ChunkDebugInfo debugInfo = null)
+            => SetMeshData(vertices, indices, null, null, null, null, graphicsDevice, debugInfo);
 
         // ── Draw opaque geometry ───────────────────────────────────────
         public void Draw(GraphicsDevice graphicsDevice, BoundingFrustum cameraFrustum)
@@ -154,7 +194,7 @@ namespace game
             }
         }
 
-        // ── Draw water geometry ────────────────────────────────────────
+        // ── Draw water geometry (transparente) ────────────────────────
         public void DrawWater(GraphicsDevice graphicsDevice, BoundingFrustum cameraFrustum)
         {
             lock (_meshLock)
@@ -164,6 +204,19 @@ namespace game
                 graphicsDevice.Indices = _waterIndexBuffer;
                 graphicsDevice.DrawIndexedPrimitives(PrimitiveType.TriangleList,
                     0, 0, _waterIndices.Length / 3);
+            }
+        }
+
+        // ── Draw river geometry (opaco) ───────────────────────────────
+        public void DrawRiver(GraphicsDevice graphicsDevice, BoundingFrustum cameraFrustum)
+        {
+            lock (_meshLock)
+            {
+                if (_riverVertexBuffer == null || _riverIndexBuffer == null) return;
+                graphicsDevice.SetVertexBuffer(_riverVertexBuffer);
+                graphicsDevice.Indices = _riverIndexBuffer;
+                graphicsDevice.DrawIndexedPrimitives(PrimitiveType.TriangleList,
+                    0, 0, _riverIndices.Length / 3);
             }
         }
 
@@ -177,7 +230,10 @@ namespace game
 
         public float GetDistanceTo(Vector3 point)
         {
-            Vector3 c = new Vector3(X * _size + _size / 2f, Y * _size + _size / 2f, Z * _size + _size / 2f);
+            Vector3 c = new Vector3(
+                X * _size + _size / 2f,
+                Y * _size + _size / 2f,
+                Z * _size + _size / 2f);
             return Vector3.Distance(point, c);
         }
 
@@ -185,10 +241,12 @@ namespace game
         {
             lock (_meshLock)
             {
-                _vertexBuffer?.Dispose(); _indexBuffer?.Dispose();
+                _vertexBuffer?.Dispose();      _indexBuffer?.Dispose();
                 _waterVertexBuffer?.Dispose(); _waterIndexBuffer?.Dispose();
-                _vertexBuffer = null;
+                _riverVertexBuffer?.Dispose(); _riverIndexBuffer?.Dispose();
+                _vertexBuffer      = null;
                 _waterVertexBuffer = null;
+                _riverVertexBuffer = null;
             }
         }
     }

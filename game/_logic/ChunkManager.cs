@@ -15,7 +15,7 @@ namespace game
         private readonly Dictionary<Vector3Int, VeryLowPolyChunk> _veryLowPolyChunks;
         private readonly HashSet<Vector3Int> _pendingHqAfterLp;
         private readonly Queue<(Vector3Int pos, ChunkType type, int level)> _generationQueue;
-        private const int MAX_QUEUE_SIZE = 50000;
+        private const int MAX_QUEUE_SIZE = 5000;
 
         // ── Mesh-upload queues – locks SEPARADOS para no serializar uploads ──
         private readonly Queue<MeshData> _meshDataQueue;
@@ -38,6 +38,22 @@ namespace game
         private int VlpDistXZ => LodDistXZ + 4;
         private const int VlpDistY = 1;
         private bool _enableVeryLowPoly = true;
+
+        private bool _fancyWater = true;
+
+        public bool FancyWater
+        {
+            get => _fancyWater;
+            set
+            {
+                if (_fancyWater == value) return;
+                _fancyWater = value;
+                lock (_chunkLock)
+                    foreach (var c in _chunks.Values)
+                        c.MarkDirty();
+                _lastPlayerChunkPos = new Vector3Int(int.MinValue, int.MinValue, int.MinValue);
+            }
+        }
 
         public bool EnableVeryLowPoly
         {
@@ -317,7 +333,6 @@ namespace game
 
             UpdateActiveLevels(centerChunk);
 
-            // ── Merge con cola previa – pre-computa distancias ANTES del sort ─
             var finalSet = new HashSet<(Vector3Int, ChunkType, int)>(chunksToGenerate);
             var finalList = new List<(Vector3Int pos, ChunkType type, int level)>(chunksToGenerate);
 
@@ -338,8 +353,6 @@ namespace game
                 }
             }
 
-            // Pre-computa distancia una sola vez por entrada para evitar
-            // recalcularla O(n log n) veces dentro del comparador.
             float px = (float)Math.Floor(playerPosition.X / _chunkSize);
             float pz = (float)Math.Floor(playerPosition.Z / _chunkSize);
 
@@ -437,7 +450,6 @@ namespace game
 
         private enum ChunkType { HighQuality, LowPoly, VeryLowPoly }
 
-        // ── Despacha TODOS los slots libres en un solo frame ─────────────────
         private void ProcessGenerationQueue()
         {
             while (true)
@@ -511,7 +523,7 @@ namespace game
                 }
             });
         }
-        // Extender el struct (al final de ChunkManager.cs)
+
         private void GenerateNormalChunkTask(Vector3Int cp)
         {
             byte[,,] blocks = _worldGenerator.GetOrGenerateChunk(cp.X, cp.Y, cp.Z, _chunkSize);
@@ -526,33 +538,40 @@ namespace game
             Chunk[,,] neighbors = new Chunk[3, 3, 3];
             lock (_chunkLock)
             {
-                for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) for (int dz = -1; dz <= 1; dz++)
-                    _chunks.TryGetValue(new Vector3Int(cp.X + dx, cp.Y + dy, cp.Z + dz), out neighbors[dx + 1, dy + 1, dz + 1]);
+                for (int dx = -1; dx <= 1; dx++)
+                    for (int dy = -1; dy <= 1; dy++)
+                        for (int dz = -1; dz <= 1; dz++)
+                            _chunks.TryGetValue(
+                                new Vector3Int(cp.X + dx, cp.Y + dy, cp.Z + dz),
+                                out neighbors[dx + 1, dy + 1, dz + 1]);
             }
-
-            var mesher = new GreedyMesher(chunk, neighbors, _chunkSize);
-            var (vertices, indices, _waterVerts, _waterIdx, debugInfo) = mesher.GenerateMesh();
+            var mesher = new GreedyMesher(chunk, neighbors, _chunkSize, fancyWater: _fancyWater);
+            var (vertices, indices, waterVerts, waterIdx, riverVerts, riverIdx, debugInfo)
+                = mesher.GenerateMesh();
 
             lock (_chunkLock) { if (!_chunks.ContainsKey(cp)) return; }
 
             if (vertices != null && indices != null)
+            {
                 lock (_hqMeshQueueLock)
                 {
-
-
-                    // En GenerateNormalChunkTask, enqueue correcto:
                     _meshDataQueue.Enqueue(new MeshData
                     {
                         ChunkPos = cp,
                         Vertices = vertices,
                         Indices = indices,
-                        WaterVertices = _waterVerts,   // AGREGAR
-                        WaterIndices = _waterIdx,      // AGREGAR
+                        WaterVertices = waterVerts,
+                        WaterIndices = waterIdx,
+                        RiverVertices = riverVerts,
+                        RiverIndices = riverIdx,
                         DebugInfo = debugInfo
                     });
                 }
+            }
             else
+            {
                 lock (_chunkLock) { if (_chunks.TryGetValue(cp, out var c)) c.MarkMeshEmpty(); }
+            }
         }
 
         private void GenerateLowPolyChunkTask(Vector3Int cp, int level)
@@ -562,19 +581,34 @@ namespace game
                 if (!_lowPolyChunks.TryGetValue(cp, out var lpCheck)) return;
                 if (lpCheck.HasMeshForLevel(level)) return;
             }
-            byte[,,] blocks = _worldGenerator.GenerateLowPolyChunk(cp.X, cp.Y, cp.Z, _chunkSize, simplificationLevel: level);
-            lock (_chunkLock) { if (_lowPolyChunks.TryGetValue(cp, out var lp)) lp.SetBlocksForLevel(blocks, level); }
+            byte[,,] blocks = _worldGenerator.GenerateLowPolyChunk(
+                cp.X, cp.Y, cp.Z, _chunkSize, simplificationLevel: level);
+            lock (_chunkLock)
+            {
+                if (_lowPolyChunks.TryGetValue(cp, out var lp))
+                    lp.SetBlocksForLevel(blocks, level);
+            }
 
             var tmp = new LowPolyChunk(cp.X, cp.Y, cp.Z, _chunkSize);
             tmp.SetBlocksForLevel(blocks, 0);
             var mesher = new SimpleLowPolyMesher(tmp, _chunkSize, simplificationLevel: level);
-            var (vertices, indices) = mesher.GenerateMesh();
+            var (verts, idx) = mesher.GenerateMesh();
 
-            if (vertices != null && indices != null)
+            if (verts != null && idx != null)
                 lock (_lpMeshQueueLock)
-                    _lowPolyMeshDataQueue.Enqueue(new MeshDataLowPoly { ChunkPos = cp, Vertices = vertices, Indices = indices, Level = level });
+                    _lowPolyMeshDataQueue.Enqueue(new MeshDataLowPoly
+                    {
+                        ChunkPos = cp,
+                        Vertices = verts,
+                        Indices = idx,
+                        Level = level
+                    });
             else
-                lock (_chunkLock) { if (_lowPolyChunks.TryGetValue(cp, out var lp)) lp.SetMeshData(null, null, _graphicsDevice, level); }
+                lock (_chunkLock)
+                {
+                    if (_lowPolyChunks.TryGetValue(cp, out var lp))
+                        lp.SetMeshData(null, null, _graphicsDevice, level);
+                }
         }
 
         private void GenerateVeryLowPolyChunkTask(Vector3Int cp)
@@ -585,20 +619,30 @@ namespace game
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[VLP] SetHeightMap failed {cp}: {ex.Message}");
-                lock (_chunkLock) { if (_veryLowPolyChunks.TryGetValue(cp, out var v)) v.MarkMeshFailed(); }
+                lock (_chunkLock)
+                {
+                    if (_veryLowPolyChunks.TryGetValue(cp, out var v)) v.MarkMeshFailed();
+                }
                 return;
             }
             var mesher = new VeryLowPolyMesher(tmp, _chunkSize);
-            var (vertices, indices) = mesher.GenerateMesh();
+            var (verts, idx) = mesher.GenerateMesh();
 
-            if (vertices != null && indices != null)
+            if (verts != null && idx != null)
                 lock (_vlpMeshQueueLock)
-                    _veryLowPolyMeshDataQueue.Enqueue(new MeshDataVeryLowPoly { ChunkPos = cp, Vertices = vertices, Indices = indices });
+                    _veryLowPolyMeshDataQueue.Enqueue(new MeshDataVeryLowPoly
+                    {
+                        ChunkPos = cp,
+                        Vertices = verts,
+                        Indices = idx
+                    });
             else
-                lock (_chunkLock) { if (_veryLowPolyChunks.TryGetValue(cp, out var v)) v.MarkMeshFailed(); }
+                lock (_chunkLock)
+                {
+                    if (_veryLowPolyChunks.TryGetValue(cp, out var v)) v.MarkMeshFailed();
+                }
         }
 
-        // ── Procesa cada queue con su propio lock (sin serialización cruzada) ─
         private void ProcessMeshDataQueue()
         {
             lock (_hqMeshQueueLock)
@@ -610,12 +654,17 @@ namespace game
                     {
                         if (_chunks.TryGetValue(md.ChunkPos, out var c) && !c.HasMesh)
                         {
-                            c.SetMeshData(md.Vertices, md.Indices, md.WaterVertices, md.WaterIndices, _graphicsDevice, md.DebugInfo);
+                            c.SetMeshData(
+                                md.Vertices, md.Indices,
+                                md.WaterVertices, md.WaterIndices,
+                                md.RiverVertices, md.RiverIndices,
+                                _graphicsDevice, md.DebugInfo);
                             _renderListDirty = true;
                         }
                     }
                 }
             }
+
             lock (_lpMeshQueueLock)
             {
                 while (_lowPolyMeshDataQueue.Count > 0)
@@ -631,6 +680,7 @@ namespace game
                     }
                 }
             }
+
             lock (_vlpMeshQueueLock)
             {
                 while (_veryLowPolyMeshDataQueue.Count > 0)
@@ -648,7 +698,6 @@ namespace game
             }
         }
 
-        // ── Reconstruye la render list solo cuando algo cambió ───────────────
         private void RebuildRenderListIfNeeded()
         {
             if (!_renderListDirty) return;
@@ -671,26 +720,18 @@ namespace game
             }
         }
 
-
-        /// <summary>
-        /// Renders the water (transparent) mesh of every loaded chunk.
-        /// Call this AFTER the opaque Draw() pass, with BlendState.AlphaBlend active.
-        /// </summary>
+        // ── Draw transparent water (océano ≤ SeaLevel) ───────────────
         public void DrawWater(WaterEffect waterEffect, BoundingFrustum frustum)
         {
-            // ChunkManager stores chunks in _chunks (Dictionary<Vector3Int, Chunk>)
-            // or whichever collection you use.  Iterate identically to Draw().
             lock (_chunkLock)
             {
                 foreach (var kvp in _chunks)
                 {
                     var chunk = kvp.Value;
                     if (!chunk.HasWaterMesh) continue;
-                    if (frustum != null)
-                    {
-                        var bbox = chunk.GetBoundingBox();
-                        if (frustum.Contains(bbox) == ContainmentType.Disjoint) continue;
-                    }
+                    if (frustum != null &&
+                        frustum.Contains(chunk.GetBoundingBox()) == ContainmentType.Disjoint) continue;
+
                     waterEffect.World = Matrix.CreateTranslation(
                         chunk.X * _chunkSize,
                         chunk.Y * _chunkSize,
@@ -701,6 +742,27 @@ namespace game
             }
         }
 
+        // ── Draw opaque river water (ríos/cascadas > SeaLevel) ───────
+        public void DrawRiver(WaterEffect waterEffect, BoundingFrustum frustum)
+        {
+            lock (_chunkLock)
+            {
+                foreach (var kvp in _chunks)
+                {
+                    var chunk = kvp.Value;
+                    if (!chunk.HasRiverMesh) continue;
+                    if (frustum != null &&
+                        frustum.Contains(chunk.GetBoundingBox()) == ContainmentType.Disjoint) continue;
+
+                    waterEffect.World = Matrix.CreateTranslation(
+                        chunk.X * _chunkSize,
+                        chunk.Y * _chunkSize,
+                        chunk.Z * _chunkSize);
+                    waterEffect.CurrentTechnique.Passes[0].Apply();
+                    chunk.DrawRiver(_graphicsDevice, frustum);
+                }
+            }
+        }
 
         public void Draw(BasicEffect effect, BoundingFrustum cameraFrustum,
                          Vector3Int? currentChunk = null, bool wireframeOnly = false)
@@ -714,7 +776,8 @@ namespace game
                     if (wireframeOnly && currentChunk.HasValue &&
                         (chunk.X != currentChunk.Value.X || chunk.Z != currentChunk.Value.Z)) continue;
                     if (!IsChunkInFrustum(chunk.X, chunk.Y, chunk.Z, cameraFrustum)) continue;
-                    effect.World = Matrix.CreateTranslation(chunk.X * _chunkSize, chunk.Y * _chunkSize, chunk.Z * _chunkSize);
+                    effect.World = Matrix.CreateTranslation(
+                        chunk.X * _chunkSize, chunk.Y * _chunkSize, chunk.Z * _chunkSize);
                     effect.CurrentTechnique.Passes[0].Apply();
                     chunk.Draw(_graphicsDevice, cameraFrustum);
                 }
@@ -728,7 +791,8 @@ namespace game
                     if (!chunk.HasMeshForLevel(renderLevel)) continue;
                     int saved = chunk.ActiveLevel;
                     chunk.ActiveLevel = renderLevel;
-                    effect.World = Matrix.CreateTranslation(chunk.X * _chunkSize, chunk.Y * _chunkSize, chunk.Z * _chunkSize);
+                    effect.World = Matrix.CreateTranslation(
+                        chunk.X * _chunkSize, chunk.Y * _chunkSize, chunk.Z * _chunkSize);
                     effect.CurrentTechnique.Passes[0].Apply();
                     chunk.Draw(_graphicsDevice, cameraFrustum);
                     chunk.ActiveLevel = saved;
@@ -744,7 +808,8 @@ namespace game
                         if (lp.HasMeshForLevel(best)) continue;
                     }
                     if (!IsChunkInFrustum(chunk.X, chunk.Y, chunk.Z, cameraFrustum)) continue;
-                    effect.World = Matrix.CreateTranslation(chunk.X * _chunkSize, chunk.Y * _chunkSize, chunk.Z * _chunkSize);
+                    effect.World = Matrix.CreateTranslation(
+                        chunk.X * _chunkSize, chunk.Y * _chunkSize, chunk.Z * _chunkSize);
                     effect.CurrentTechnique.Passes[0].Apply();
                     chunk.Draw(_graphicsDevice, cameraFrustum);
                 }
@@ -761,8 +826,12 @@ namespace game
             var cp = GetChunkCoordinates(worldPos);
             var chunk = GetChunk(cp);
             if (chunk == null) return BlockType.Air;
-            int lx = (int)worldPos.X % _chunkSize, ly = (int)worldPos.Y % _chunkSize, lz = (int)worldPos.Z % _chunkSize;
-            if (lx < 0) lx += _chunkSize; if (ly < 0) ly += _chunkSize; if (lz < 0) lz += _chunkSize;
+            int lx = (int)worldPos.X % _chunkSize,
+                ly = (int)worldPos.Y % _chunkSize,
+                lz = (int)worldPos.Z % _chunkSize;
+            if (lx < 0) lx += _chunkSize;
+            if (ly < 0) ly += _chunkSize;
+            if (lz < 0) lz += _chunkSize;
             return chunk.GetBlock(lx, ly, lz);
         }
 
@@ -777,17 +846,36 @@ namespace game
                         for (int i = 0; i < LowPolyChunk.LOD_LEVELS; i++)
                             if (c.HasMeshForLevel(i) || c.IsMeshBuildingForLevel(i)) { lp++; break; }
                     int vlp = 0;
-                    foreach (var c in _veryLowPolyChunks.Values) if (c.HasMesh || c.IsMeshBuilding) vlp++;
+                    foreach (var c in _veryLowPolyChunks.Values)
+                        if (c.HasMesh || c.IsMeshBuilding) vlp++;
                     return _chunks.Count + lp + vlp;
                 }
             }
         }
 
-        public int TotalChunkEntries { get { lock (_chunkLock) return _chunks.Count + _lowPolyChunks.Count + _veryLowPolyChunks.Count; } }
-        public int GenerationQueueCount { get { lock (_queueLock) return _generationQueue.Count; } }
+        public int TotalChunkEntries
+        { get { lock (_chunkLock) return _chunks.Count + _lowPolyChunks.Count + _veryLowPolyChunks.Count; } }
+
+        public int GenerationQueueCount
+        { get { lock (_queueLock) return _generationQueue.Count; } }
+
         public int ActiveGenerationTasks => _activeGenerationTasks;
-        public int PendingHqCount { get { lock (_chunkLock) return _pendingHqAfterLp.Count; } }
-        public int VeryLowPolyChunkCount { get { lock (_chunkLock) { int n = 0; foreach (var c in _veryLowPolyChunks.Values) if (c.HasMesh) n++; return n; } } }
+
+        public int PendingHqCount
+        { get { lock (_chunkLock) return _pendingHqAfterLp.Count; } }
+
+        public int VeryLowPolyChunkCount
+        {
+            get
+            {
+                lock (_chunkLock)
+                {
+                    int n = 0;
+                    foreach (var c in _veryLowPolyChunks.Values) if (c.HasMesh) n++;
+                    return n;
+                }
+            }
+        }
 
         public void Dispose()
         {
@@ -796,7 +884,9 @@ namespace game
                 foreach (var c in _chunks.Values) c.Dispose();
                 foreach (var c in _lowPolyChunks.Values) c.Dispose();
                 foreach (var c in _veryLowPolyChunks.Values) c.Dispose();
-                _chunks.Clear(); _lowPolyChunks.Clear(); _veryLowPolyChunks.Clear();
+                _chunks.Clear();
+                _lowPolyChunks.Clear();
+                _veryLowPolyChunks.Clear();
                 _pendingHqAfterLp.Clear();
             }
         }
@@ -807,17 +897,34 @@ namespace game
                         pos.Z * _chunkSize + _chunkSize / 2f);
     }
 
+    // ── Structs de datos de mesh ─────────────────────────────────────────────
+
     internal struct MeshData
     {
         public Vector3Int ChunkPos;
         public VertexPositionNormalColor[] Vertices;
         public ushort[] Indices;
-        public VertexPositionNormalColor[] WaterVertices;  // AGREGAR
-        public ushort[] WaterIndices;                       // AGREGAR
+        public VertexPositionNormalColor[] WaterVertices;
+        public ushort[] WaterIndices;
+        public VertexPositionNormalColor[] RiverVertices;  // ← nuevo
+        public ushort[] RiverIndices;    // ← nuevo
         public ChunkDebugInfo DebugInfo;
     }
-    internal struct MeshDataLowPoly { public Vector3Int ChunkPos; public VertexPositionNormalColor[] Vertices; public ushort[] Indices; public int Level; }
-    internal struct MeshDataVeryLowPoly { public Vector3Int ChunkPos; public VertexPositionNormalColor[] Vertices; public ushort[] Indices; }
+
+    internal struct MeshDataLowPoly
+    {
+        public Vector3Int ChunkPos;
+        public VertexPositionNormalColor[] Vertices;
+        public ushort[] Indices;
+        public int Level;
+    }
+
+    internal struct MeshDataVeryLowPoly
+    {
+        public Vector3Int ChunkPos;
+        public VertexPositionNormalColor[] Vertices;
+        public ushort[] Indices;
+    }
 
     public struct Vector3Int : IEquatable<Vector3Int>
     {
@@ -830,7 +937,8 @@ namespace game
         public override int GetHashCode() => HashCode.Combine(X, Y, Z);
         public static bool operator ==(Vector3Int a, Vector3Int b) => a.Equals(b);
         public static bool operator !=(Vector3Int a, Vector3Int b) => !a.Equals(b);
-        public static Vector3Int operator +(Vector3Int a, Vector3Int b) => new Vector3Int(a.X + b.X, a.Y + b.Y, a.Z + b.Z);
+        public static Vector3Int operator +(Vector3Int a, Vector3Int b) =>
+            new Vector3Int(a.X + b.X, a.Y + b.Y, a.Z + b.Z);
         public override string ToString() => $"({X},{Y},{Z})";
     }
 }

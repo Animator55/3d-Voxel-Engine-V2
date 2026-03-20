@@ -21,7 +21,7 @@ namespace game
 
         private Camera _camera;
         private ChunkManager _chunkManager;
-        private int _loadDistance = 5;
+        private int _loadDistance = 10;
 
         private ProceduralSkybox _skybox;
         private Effect _skyEffect;
@@ -35,6 +35,7 @@ namespace game
 
         private bool _showDebug = false;
         private bool _wireframeMode = false;
+        private bool _fancyWater = true;
         private bool _lastF3 = false;
         private bool _lastT = false;
 
@@ -123,9 +124,14 @@ namespace game
             // ── Water shader ──────────────────────────────────────────
             _waterFx = Content.Load<Effect>("Water");   // Water.fx → Content/Water.fx
             _waterEffect = new WaterEffect(_waterFx);
+            _waterEffect.WaterAlpha = 0.3f;
             _waterEffect.FogEnabled = true;
             _waterEffect.FogStart = _loadDistance * 2 * 24f;
             _waterEffect.FogEnd = _loadDistance * 2 * 36f;
+            _waterEffect.CameraLightEnabled = _cameraLightEnabled;
+            _waterEffect.CameraLightRadius = _cameraLightRadius;
+            _waterEffect.CameraLightIntensity = _cameraLightIntensity;
+            _waterEffect.CameraLightColor = new Vector3(1f, 0.92f, 0.75f);
 
             _pixel = new Texture2D(GraphicsDevice, 1, 1);
             _pixel.SetData(new[] { Color.White });
@@ -136,7 +142,7 @@ namespace game
             _skyEffect = Content.Load<Effect>("Sky");
             _skybox = new ProceduralSkybox(GraphicsDevice, _skyEffect, startHour: 8f);
 
-            _emissiveBlocks.Add((new Vector3(0, 40, 0), BlockType.Glowstone));
+            _emissiveBlocks.Add((new Vector3(20, 22, 0), BlockType.Glowstone));
             _emissiveBlocks.Add((new Vector3(-32, 68, 16), BlockType.Glowstone));
 
             var initialSettings = new GameSettings
@@ -173,7 +179,13 @@ namespace game
 
             _voxelEffect.FogEnabled = s.FogEnabled;
             _waterEffect.FogEnabled = s.FogEnabled;
+            _waterEffect.CameraLightEnabled = _cameraLightEnabled;
+            _waterEffect.WaterAlpha = 0.3f;
+            _waterEffect.CameraLightRadius = _cameraLightRadius;
+            _waterEffect.CameraLightIntensity = _cameraLightIntensity;
+            _waterEffect.CameraLightColor = new Vector3(1f, 0.92f, 0.75f);
             _wireframeMode = s.WireframeMode;
+            _fancyWater = s.FancyWater;
             _showDebug = s.ShowDebugHud;
 
             if (!s.DirectionalLight)
@@ -189,7 +201,10 @@ namespace game
             _voxelEffect.CameraLightRadius = _cameraLightRadius;
             _voxelEffect.CameraLightIntensity = _cameraLightIntensity;
 
-            if (s.LoadDistance != _loadDistance || s.AoStrength != GreedyMesher.AoStrength)
+            if (s.LoadDistance != _loadDistance
+            || s.AoStrength != GreedyMesher.AoStrength
+            || s.FancyWater != _chunkManager.FancyWater
+            )
             {
                 _loadDistance = s.LoadDistance;
                 _chunkManager.Dispose();
@@ -206,6 +221,8 @@ namespace game
             _waterEffect.FogEnd = fe;
 
             _chunkManager.EnableVeryLowPoly = s.EnableVeryLowPoly;
+            _chunkManager.FancyWater = s.FancyWater;
+            _fancyWater = s.FancyWater;
             GreedyMesher.AoStrength = s.AoStrength;
         }
 
@@ -220,6 +237,7 @@ namespace game
                 else { _pauseMenu.Open(); IsMouseVisible = true; }
             }
             _lastEscape = escNow;
+            _chunkManager.Update(_camera.Position, null);
 
             if (_pauseMenu.IsOpen)
             {
@@ -238,7 +256,6 @@ namespace game
             _lastT = t;
 
             _camera.Update(gameTime);
-            _chunkManager.Update(_camera.Position, null);
             _skybox.Update(gameTime);
 
             // ── Water time counter ────────────────────────────────────
@@ -343,20 +360,35 @@ namespace game
             {
                 _chunkManager.Draw(_voxelEffect, frustum);
             }
-            GraphicsDevice.BlendState = BlendState.Opaque;
-            GraphicsDevice.DepthStencilState = DepthStencilState.Default;
-            GraphicsDevice.RasterizerState = new RasterizerState
+            if (_fancyWater)
             {
-                CullMode = CullMode.None,
-                FillMode = FillMode.Solid
-            };
+                _waterEffect.View = _camera.ViewMatrix;
+                _waterEffect.Projection = _camera.ProjectionMatrix;
 
-            _waterEffect.View = _camera.ViewMatrix;
-            _waterEffect.Projection = _camera.ProjectionMatrix;
-            _chunkManager.DrawWater(_waterEffect, frustum);
+                GraphicsDevice.DepthStencilState = DepthStencilState.Default;
+                GraphicsDevice.BlendState = BlendState.Opaque;
+                GraphicsDevice.RasterizerState = new RasterizerState
+                {
+                    CullMode = CullMode.CullClockwiseFace,
+                    FillMode = FillMode.Solid
+                };
+                _chunkManager.DrawWater(_waterEffect, frustum);
 
-            // Restaurar
-            GraphicsDevice.RasterizerState = _solidState;
+                // PASS 3 – Agua transparente (worldY <= SeaLevel: océano)
+                GraphicsDevice.DepthStencilState = DepthStencilState.DepthRead;
+                GraphicsDevice.BlendState = BlendState.AlphaBlend;
+                GraphicsDevice.RasterizerState = new RasterizerState
+                {
+                    CullMode = CullMode.None,
+                    FillMode = FillMode.Solid
+                };
+                _chunkManager.DrawRiver(_waterEffect, frustum);
+
+                // Restaurar
+                GraphicsDevice.DepthStencilState = DepthStencilState.Default;
+                GraphicsDevice.BlendState = BlendState.Opaque;
+                GraphicsDevice.RasterizerState = _solidState;
+            }
             // ─────────────────────────────────────────────────────────
             //  HUD
             // ─────────────────────────────────────────────────────────
@@ -423,7 +455,9 @@ namespace game
 
             R.Add(("", "[ World ]", CHeader));
             R.Add(("chunk size", "32x32x32", CValue));
-            R.Add(("load dist", $"{_loadDistance} chunks", CValue));
+            R.Add(("HQ dist", $"{_loadDistance} chunks", CValue));
+            R.Add(("LP dist", $"{_loadDistance * 4} chunks", CValue));
+            if (_pauseMenu.Settings.EnableVeryLowPoly) R.Add(("VLP dist", $"{_loadDistance * 4 + 4} chunks", CValue));
 
             float tod = _skybox.TimeOfDay;
             int hh = (int)tod;

@@ -8,27 +8,32 @@ namespace game
 {
     public class GreedyMesher : IAOProvider
     {
-        private readonly Chunk     _chunk;
+        private readonly Chunk _chunk;
         private readonly Chunk[,,] _neighborChunks;
-        private readonly int       _size;
+        private readonly int _size;
 
         private List<VertexPositionNormalColor> _vertices;
-        private List<ushort>                   _indices;
+        private List<ushort> _indices;
         private List<VertexPositionNormalColor> _waterVertices;
-        private List<ushort>                   _waterIndices;
+        private List<ushort> _waterIndices;
+        private List<VertexPositionNormalColor> _riverVertices;   // ← nuevo
+        private List<ushort> _riverIndices;     // ← nuevo
 
         private readonly AmbientOcclusionCalculator _ao;
         private readonly float[] _aoBuffer = new float[4];
         public static float AoStrength = 0.4f;
 
-        public GreedyMesher(Chunk chunk, Chunk[,,] neighborChunks, int size = 16)
-        {
-            _chunk          = chunk;
-            _neighborChunks = neighborChunks;
-            _size           = size;
-            _ao             = new AmbientOcclusionCalculator(this, aoStrength: AoStrength);
-        }
+        private const int SeaLevel = 20; // debe coincidir con WorldGenerator.SeaLevel
+        private readonly bool _fancyWater;
 
+        public GreedyMesher(Chunk chunk, Chunk[,,] neighborChunks, int size = 16, bool fancyWater = true)
+        {
+            _chunk = chunk;
+            _neighborChunks = neighborChunks;
+            _size = size;
+            _fancyWater = fancyWater;
+            _ao = new AmbientOcclusionCalculator(this, aoStrength: AoStrength);
+        }
         // ─── IAOProvider ─────────────────────────────────────────────
         public bool IsSolid(int x, int y, int z)
         {
@@ -54,51 +59,54 @@ namespace game
 
         // ─── Main entry ───────────────────────────────────────────────
         public (VertexPositionNormalColor[] vertices, ushort[] indices,
-                VertexPositionNormalColor[] waterVerts, ushort[] waterIdx,
-                ChunkDebugInfo debugInfo) GenerateMesh()
+        VertexPositionNormalColor[] waterVerts, ushort[] waterIdx,
+        VertexPositionNormalColor[] riverVerts, ushort[] riverIdx,
+        ChunkDebugInfo debugInfo) GenerateMesh()
         {
-            var sw        = Stopwatch.StartNew();
+            var sw = Stopwatch.StartNew();
             var debugInfo = new ChunkDebugInfo();
 
-            _vertices      = new List<VertexPositionNormalColor>();
-            _indices       = new List<ushort>();
+            _vertices = new List<VertexPositionNormalColor>();
+            _indices = new List<ushort>();
             _waterVertices = new List<VertexPositionNormalColor>();
-            _waterIndices  = new List<ushort>();
+            _waterIndices = new List<ushort>();
+            _riverVertices = new List<VertexPositionNormalColor>();
+            _riverIndices = new List<ushort>();
 
             var blocks = _chunk.GetBlocks();
 
             var meshSw = Stopwatch.StartNew();
 
             // ── Opaque pass ──────────────────────────────────────────
-            ProcessFaceDirection(blocks, Axis.X,  1, water: false);
+            ProcessFaceDirection(blocks, Axis.X, 1, water: false);
             ProcessFaceDirection(blocks, Axis.X, -1, water: false);
-            ProcessFaceDirection(blocks, Axis.Y,  1, water: false);
+            ProcessFaceDirection(blocks, Axis.Y, 1, water: false);
             ProcessFaceDirection(blocks, Axis.Y, -1, water: false);
-            ProcessFaceDirection(blocks, Axis.Z,  1, water: false);
+            ProcessFaceDirection(blocks, Axis.Z, 1, water: false);
             ProcessFaceDirection(blocks, Axis.Z, -1, water: false);
 
             // ── Water pass ───────────────────────────────────────────
-            // Only the top face (Y+) of water blocks is visible from above.
-            // We also render side and bottom faces so underwater looks correct.
-            ProcessFaceDirection(blocks, Axis.X,  1, water: true);
+            ProcessFaceDirection(blocks, Axis.X, 1, water: true);
             ProcessFaceDirection(blocks, Axis.X, -1, water: true);
-            ProcessFaceDirection(blocks, Axis.Y,  1, water: true);
+            ProcessFaceDirection(blocks, Axis.Y, 1, water: true);
             ProcessFaceDirection(blocks, Axis.Y, -1, water: true);
-            ProcessFaceDirection(blocks, Axis.Z,  1, water: true);
+            ProcessFaceDirection(blocks, Axis.Z, 1, water: true);
             ProcessFaceDirection(blocks, Axis.Z, -1, water: true);
 
             meshSw.Stop();
             sw.Stop();
 
-            debugInfo.GreedyMeshingTimeMs  = meshSw.ElapsedMilliseconds;
+            debugInfo.GreedyMeshingTimeMs = meshSw.ElapsedMilliseconds;
             debugInfo.MeshGenerationTimeMs = sw.ElapsedMilliseconds;
 
             return (
-                _vertices.Count      > 0 ? _vertices.ToArray()      : null,
-                _indices.Count       > 0 ? _indices.ToArray()        : null,
-                _waterVertices.Count > 0 ? _waterVertices.ToArray()  : null,
-                _waterIndices.Count  > 0 ? _waterIndices.ToArray()   : null,
-                debugInfo);
+        _vertices.Count > 0 ? _vertices.ToArray() : null,
+        _indices.Count > 0 ? _indices.ToArray() : null,
+        _waterVertices.Count > 0 ? _waterVertices.ToArray() : null,
+        _waterIndices.Count > 0 ? _waterIndices.ToArray() : null,
+        _riverVertices.Count > 0 ? _riverVertices.ToArray() : null,
+        _riverIndices.Count > 0 ? _riverIndices.ToArray() : null,
+        debugInfo);
         }
 
         // ─── Per-direction face processing ───────────────────────────
@@ -120,16 +128,15 @@ namespace game
 
                         byte blockType = GetBlockAtIndices(blocks, axis, main, a, b);
 
-                        // Route to correct pass
-                        if (water)  { if (!BlockType.IsWater(blockType))   continue; }
-                        else        { if (!BlockType.IsSolid(blockType))   continue; }
+                        if (water) { if (!BlockType.IsWater(blockType)) continue; }
+                        else { if (!BlockType.IsSolid(blockType)) continue; }
 
                         var (x, y, z) = GetCoordinatesFromIndices(axis, main, a, b);
 
-                        if (!IsFaceVisibleForType(blocks, axis, direction, x, y, z, water))
+                        if (!IsFaceVisible(blocks, axis, direction, x, y, z, water))
                             continue;
 
-                        int width  = GreedyExpandWidth(blocks, processed, axis, direction, main, a, b, blockType, water);
+                        int width = GreedyExpandWidth(blocks, processed, axis, direction, main, a, b, blockType, water);
                         int height = GreedyExpandHeight(blocks, processed, axis, direction, main, a, b, width, blockType, water);
 
                         for (int wa = 0; wa < width; wa++)
@@ -153,7 +160,7 @@ namespace game
                 byte b = GetBlockAtIndices(blocks, axis, main, startA + width, startB);
                 if (b != blockType) break;
                 var (x, y, z) = GetCoordinatesFromIndices(axis, main, startA + width, startB);
-                if (!IsFaceVisibleForType(blocks, axis, direction, x, y, z, water)) break;
+                if (!IsFaceVisible(blocks, axis, direction, x, y, z, water)) break;
                 width++;
             }
             return width;
@@ -172,7 +179,7 @@ namespace game
                     byte bl = GetBlockAtIndices(blocks, axis, main, a, startB + height);
                     if (bl != blockType) { canExpand = false; break; }
                     var (x, y, z) = GetCoordinatesFromIndices(axis, main, a, startB + height);
-                    if (!IsFaceVisibleForType(blocks, axis, direction, x, y, z, water)) { canExpand = false; break; }
+                    if (!IsFaceVisible(blocks, axis, direction, x, y, z, water)) { canExpand = false; break; }
                 }
                 if (!canExpand) break;
                 height++;
@@ -181,29 +188,55 @@ namespace game
         }
 
         // ─── Face visibility ──────────────────────────────────────────
-        /// <summary>
-        /// For opaque blocks: neighbour must be Air.
-        /// For water blocks:  neighbour must be Air (don't draw water-water borders).
-        /// </summary>
-        private bool IsFaceVisibleForType(byte[,,] blocks, Axis faceAxis, int direction,
+        private bool IsFaceVisible(byte[,,] blocks, Axis faceAxis, int direction,
             int x, int y, int z, bool water)
         {
-            int nx = x + (faceAxis == Axis.X ? direction : 0);
-            int ny = y + (faceAxis == Axis.Y ? direction : 0);
-            int nz = z + (faceAxis == Axis.Z ? direction : 0);
+            int worldY = _chunk.Y * _size + y;
 
-            byte neighbor;
-            if (nx < 0 || nx >= _size || ny < 0 || ny >= _size || nz < 0 || nz >= _size)
-                neighbor = BlockType.Air; // treat out-of-chunk as Air (edge face is visible)
-            else
-                neighbor = blocks[nx, ny, nz];
+            // ── Agua por encima del nivel del mar ─────────────────────
+            // Comportamiento IDÉNTICO a la primera versión entregada:
+            // todas las caras, visible cuando el vecino es Air.
+            // Borde de chunk tratado como Air (cara exterior visible).
+            if (water && worldY > SeaLevel)
+            {
+                int nx = x + (faceAxis == Axis.X ? direction : 0);
+                int ny = y + (faceAxis == Axis.Y ? direction : 0);
+                int nz = z + (faceAxis == Axis.Z ? direction : 0);
 
-            if (water)
-                // water face visible only when next to Air
+                byte neighbor;
+                if (nx < 0 || nx >= _size || ny < 0 || ny >= _size || nz < 0 || nz >= _size)
+                    neighbor = BlockType.Air;
+                else
+                    neighbor = blocks[nx, ny, nz];
+
                 return neighbor == BlockType.Air;
+            }
+
+            // ── Agua al nivel del mar o por debajo ────────────────────
+            // Solo cara superior (Y+1). Elimina costuras de chunk en océanos.
+            if (water && worldY <= SeaLevel)
+            {
+                if (faceAxis != Axis.Y || direction != 1)
+                    return false;
+
+                // Para la cara superior, mismo test: vecino tiene que ser Air.
+                int ny = y + 1;
+                if (ny >= _size) return true; // borde superior del chunk = Air
+                return blocks[x, ny, z] == BlockType.Air;
+            }
+
+            // ── Bloques sólidos (sin cambios) ─────────────────────────
+            int snx = x + (faceAxis == Axis.X ? direction : 0);
+            int sny = y + (faceAxis == Axis.Y ? direction : 0);
+            int snz = z + (faceAxis == Axis.Z ? direction : 0);
+
+            byte sneighbor;
+            if (snx < 0 || snx >= _size || sny < 0 || sny >= _size || snz < 0 || snz >= _size)
+                sneighbor = BlockType.Air;
             else
-                // solid face visible when next to Air or Water
-                return BlockType.IsTransparent(neighbor);
+                sneighbor = blocks[snx, sny, snz];
+
+            return BlockType.IsTransparent(sneighbor);
         }
 
         // ─── Index helpers ────────────────────────────────────────────
@@ -214,7 +247,7 @@ namespace game
                 Axis.X => blocks[main, a, b],
                 Axis.Y => blocks[a, main, b],
                 Axis.Z => blocks[a, b, main],
-                _      => BlockType.Air
+                _ => BlockType.Air
             };
         }
 
@@ -225,7 +258,7 @@ namespace game
                 Axis.X => (main, a, b),
                 Axis.Y => (a, main, b),
                 Axis.Z => (a, b, main),
-                _      => (0, 0, 0)
+                _ => (0, 0, 0)
             };
         }
 
@@ -233,9 +266,11 @@ namespace game
         private void AddRectangleFace(Axis axis, int direction, int main, int a, int b,
             int width, int height, byte blockType, int x, int y, int z, bool water)
         {
-            var vList  = water ? _waterVertices : _vertices;
-            var iList  = water ? _waterIndices  : _indices;
+            int worldY = _chunk.Y * _size + y;
+            bool isRiver = water && (worldY <= SeaLevel);
 
+            var vList = (water && _fancyWater) ? (isRiver ? _riverVertices : _waterVertices) : _vertices;
+            var iList = (water && _fancyWater) ? (isRiver ? _riverIndices : _waterIndices) : _indices;
             int baseVertex = vList.Count;
             if (baseVertex + 4 > 65535) return;
 
@@ -253,65 +288,65 @@ namespace game
             {
                 case Axis.X:
                     normal = new Vector3(direction, 0, 0);
-                    bx0 = x; by0 = a;         bz0 = b;
-                    bx1 = x; by1 = a+width-1; bz1 = b;
-                    bx2 = x; by2 = a+width-1; bz2 = b+height-1;
-                    bx3 = x; by3 = a;         bz3 = b+height-1;
+                    bx0 = x; by0 = a; bz0 = b;
+                    bx1 = x; by1 = a + width - 1; bz1 = b;
+                    bx2 = x; by2 = a + width - 1; bz2 = b + height - 1;
+                    bx3 = x; by3 = a; bz3 = b + height - 1;
                     if (direction > 0)
                     {
-                        corners[0] = new Vector3(faceOffset, a,       b);
-                        corners[1] = new Vector3(faceOffset, a+width, b);
-                        corners[2] = new Vector3(faceOffset, a+width, b+height);
-                        corners[3] = new Vector3(faceOffset, a,       b+height);
+                        corners[0] = new Vector3(faceOffset, a, b);
+                        corners[1] = new Vector3(faceOffset, a + width, b);
+                        corners[2] = new Vector3(faceOffset, a + width, b + height);
+                        corners[3] = new Vector3(faceOffset, a, b + height);
                     }
                     else
                     {
-                        corners[0] = new Vector3(faceOffset, a,       b);
-                        corners[1] = new Vector3(faceOffset, a,       b+height);
-                        corners[2] = new Vector3(faceOffset, a+width, b+height);
-                        corners[3] = new Vector3(faceOffset, a+width, b);
+                        corners[0] = new Vector3(faceOffset, a, b);
+                        corners[1] = new Vector3(faceOffset, a, b + height);
+                        corners[2] = new Vector3(faceOffset, a + width, b + height);
+                        corners[3] = new Vector3(faceOffset, a + width, b);
                     }
                     break;
                 case Axis.Y:
                     normal = new Vector3(0, direction, 0);
-                    bx0 = a;       by0 = y; bz0 = b;
-                    bx1 = a;       by1 = y; bz1 = b+height-1;
-                    bx2 = a+width-1; by2 = y; bz2 = b+height-1;
-                    bx3 = a+width-1; by3 = y; bz3 = b;
+                    bx0 = a; by0 = y; bz0 = b;
+                    bx1 = a; by1 = y; bz1 = b + height - 1;
+                    bx2 = a + width - 1; by2 = y; bz2 = b + height - 1;
+                    bx3 = a + width - 1; by3 = y; bz3 = b;
                     if (direction > 0)
                     {
-                        corners[0] = new Vector3(a,       faceOffset, b);
-                        corners[1] = new Vector3(a,       faceOffset, b+height);
-                        corners[2] = new Vector3(a+width, faceOffset, b+height);
-                        corners[3] = new Vector3(a+width, faceOffset, b);
+                        corners[0] = new Vector3(a, faceOffset, b);
+                        corners[1] = new Vector3(a, faceOffset, b + height);
+                        corners[2] = new Vector3(a + width, faceOffset, b + height);
+                        corners[3] = new Vector3(a + width, faceOffset, b);
                     }
                     else
                     {
-                        corners[0] = new Vector3(a,       faceOffset, b);
-                        corners[1] = new Vector3(a+width, faceOffset, b);
-                        corners[2] = new Vector3(a+width, faceOffset, b+height);
-                        corners[3] = new Vector3(a,       faceOffset, b+height);
+                        corners[0] = new Vector3(a, faceOffset, b);
+                        corners[1] = new Vector3(a + width, faceOffset, b);
+                        corners[2] = new Vector3(a + width, faceOffset, b + height);
+                        corners[3] = new Vector3(a, faceOffset, b + height);
                     }
                     break;
                 case Axis.Z:
                     normal = new Vector3(0, 0, direction);
-                    bx0 = a;         by0 = b;         bz0 = z;
-                    bx1 = a+width-1; by1 = b;         bz1 = z;
-                    bx2 = a+width-1; by2 = b+height-1; bz2 = z;
-                    bx3 = a;         by3 = b+height-1; bz3 = z;
+                    bx0 = a; by0 = b; bz0 = z;
+                    bx1 = a + width - 1; by1 = b; bz1 = z;
+                    bx2 = a + width - 1; by2 = b + height - 1; bz2 = z;
+                    bx3 = a; by3 = b + height - 1; bz3 = z;
                     if (direction > 0)
                     {
-                        corners[0] = new Vector3(a,       b,       faceOffset);
-                        corners[1] = new Vector3(a+width, b,       faceOffset);
-                        corners[2] = new Vector3(a+width, b+height, faceOffset);
-                        corners[3] = new Vector3(a,       b+height, faceOffset);
+                        corners[0] = new Vector3(a, b, faceOffset);
+                        corners[1] = new Vector3(a + width, b, faceOffset);
+                        corners[2] = new Vector3(a + width, b + height, faceOffset);
+                        corners[3] = new Vector3(a, b + height, faceOffset);
                     }
                     else
                     {
-                        corners[0] = new Vector3(a,       b,       faceOffset);
-                        corners[1] = new Vector3(a,       b+height, faceOffset);
-                        corners[2] = new Vector3(a+width, b+height, faceOffset);
-                        corners[3] = new Vector3(a+width, b,       faceOffset);
+                        corners[0] = new Vector3(a, b, faceOffset);
+                        corners[1] = new Vector3(a, b + height, faceOffset);
+                        corners[2] = new Vector3(a + width, b + height, faceOffset);
+                        corners[3] = new Vector3(a + width, b, faceOffset);
                     }
                     break;
                 default:
@@ -327,8 +362,7 @@ namespace game
 
             Color baseColor = BlockType.GetBlockColor(blockType);
 
-            // Water: AO has much less weight – water should stay bright
-            float aoScale = water ? 0.3f : 1.0f;
+            float aoScale = water ? 0f : 1.0f;
             for (int i = 0; i < 4; i++)
             {
                 float aoFactor = water ? (1f - aoScale * (1f - _aoBuffer[i])) : _aoBuffer[i];
@@ -336,7 +370,6 @@ namespace game
                 vList.Add(new VertexPositionNormalColor(corners[i], normal, c));
             }
 
-            // AO-driven diagonal flip for better visuals
             if (_aoBuffer[0] + _aoBuffer[2] < _aoBuffer[1] + _aoBuffer[3])
             {
                 iList.Add((ushort)(baseVertex + 1));

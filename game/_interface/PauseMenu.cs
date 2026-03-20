@@ -104,6 +104,8 @@ namespace game
                 new SectionEntry("Debug"),
                 new BoolToggle ("Debug HUD",        () => Settings.ShowDebugHud,
                                                     v  => { Settings.ShowDebugHud      = v; Fire(); }),
+                new BoolToggle ("Fancy Water",      () => Settings.FancyWater,
+                    v  => { Settings.FancyWater       = v; Fire(); }),
             };
         }
         private void Fire() => OnSettingsChanged?.Invoke(Settings);
@@ -424,10 +426,11 @@ namespace game
         public bool WireframeMode { get; set; } = false;
         public bool DirectionalLight { get; set; } = true;
         public float AmbientLight { get; set; } = 0.5f;
-        public float AoStrength { get; set; } = 1.0f;
+        public float AoStrength { get; set; } = 0.4f;
         public float MoveSpeed { get; set; } = 30f;
         public float MouseSensitivity { get; set; } = 0.002f;
         public bool ShowDebugHud { get; set; } = false;
+        public bool FancyWater { get; set; } = true;
     }
 
 
