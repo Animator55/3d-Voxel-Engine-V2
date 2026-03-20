@@ -13,8 +13,6 @@ namespace game
         private const int MinHeight = 2;
         private const float CaveThreshold = 0.62f;
 
-        // Altura máxima hasta la que el río reemplaza bloques.
-        // Por encima de este valor el cauce no existe (montaña alta).
         private const int RiverMaxHeight = 120;
 
         private readonly int[] _perm = new int[512];
@@ -102,11 +100,7 @@ namespace game
                             blocks[bx, by, bz] = GetBlockAt(worldX + bx, worldY + by, worldZ + bz, h, biome, ir);
                     }
 
-                // Pintar el cauce del río: reemplaza cualquier bloque sólido
-                // por Water en las columnas donde el noise de río es activo,
-                // desde la base del terreno hasta min(terrainH, RiverMaxHeight).
                 PaintRiverBeds(blocks, worldX, worldY, worldZ, chunkSize, heightsFlat, riverFlat);
-
                 PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize, heightsFlat, weightsFlat, riverFlat, 0);
 
                 var structures = StructurePlacer.GetStructuresForChunk(
@@ -122,26 +116,11 @@ namespace game
             }
             return blocks;
         }
+
         // ════════════════════════════════════════════════════════════════════
-        // River bed painter  (refactorizado)
+        // River bed painter
         // ════════════════════════════════════════════════════════════════════
-        //
-        // Reglas nuevas:
-        //   1. Solo pinta el bloque de SUPERFICIE (el primero sólido visto
-        //      desde arriba), no rellena la columna entera.
-        //      → Las cuevas quedan intactas; nunca hay agua enterrada.
-        //
-        //   2. La superficie real se busca bajando desde terrainH hasta
-        //      encontrar el primer bloque sólido que esté expuesto al aire.
-        //      Esto soporta terrenos con voladizos o capas de grava.
-        //
-        //   3. La generación se corta cuando surfaceY > RiverMaxHeight,
-        //      eliminando agua en cimas de montañas.
-        //      En laderas el río sí aparece (y crea cascadas naturales al
-        //      bajar de columna en columna).
-        //
-        //   4. RIVER_THRESHOLD se baja a 0.92f para que el cauce sea visible.
-        //      El valor anterior de 0.99f generaba apenas unos pocos píxeles.
+
         private const float RIVER_THRESHOLD = 0.98f;
         private const float WaterfallEdgeMin = 0.08f;
         private const float WaterfallMountainCenter = 0.62f;
@@ -174,15 +153,10 @@ namespace game
                     if (isWaterfallEdge)
                     {
                         int neighborH = Math.Max(
-                            Math.Max(
-                                GetTerrainHeightForColumn(wx, wz - 1),
-                                GetTerrainHeightForColumn(wx, wz + 1)),
-                            Math.Max(
-                                GetTerrainHeightForColumn(wx + 1, wz),
-                                GetTerrainHeightForColumn(wx - 1, wz)));
+                            Math.Max(GetTerrainHeightForColumn(wx, wz - 1), GetTerrainHeightForColumn(wx, wz + 1)),
+                            Math.Max(GetTerrainHeightForColumn(wx + 1, wz), GetTerrainHeightForColumn(wx - 1, wz)));
 
                         int waterfallTop = Math.Min(neighborH, RiverMaxHeight);
-
                         int yMin = Math.Max(SeaLevel, worldY);
                         int yMax = Math.Min(waterfallTop, worldY + chunkSize - 1);
                         if (yMin > yMax) continue;
@@ -199,10 +173,8 @@ namespace game
                     else if (isRiverOnMountain)
                     {
                         if (h > RiverMaxHeight) continue;
-
                         int surfaceBy = h - worldY;
                         if (surfaceBy < 0 || surfaceBy >= chunkSize) continue;
-
                         byte b = blocks[bx, surfaceBy, bz];
                         if (b == BlockType.Stone || b == BlockType.Dirt)
                             blocks[bx, surfaceBy, bz] = BlockType.Water;
@@ -210,7 +182,6 @@ namespace game
                 }
         }
 
-        // Altura del terreno para una columna adyacente — usa el cache existente.
         private int GetTerrainHeightForColumn(float wx, float wz)
         {
             SoftBiomeWeights(wx, wz, out float wPl, out float wFo, out float wTa,
@@ -218,23 +189,18 @@ namespace game
             return GetTerrainHeight(wx, wz, wPl, wFo, wTa, wDe, wMo, wOc, out _);
         }
 
-        // Extrae solo wMountains del sistema de biomas — mismo cálculo que
-        // SoftBiomeWeights pero descartando los otros pesos. Sin cache porque
-        // solo se llama 4 veces por columna y el noise es barato.
         private float GetMountainWeight(float wx, float wz)
         {
             float wpX = OctaveNoise2D(wx, wz, 250f, 2, 0.5f, _seed + 500) * 30f;
             float wpZ = OctaveNoise2D(wx, wz, 250f, 2, 0.5f, _seed + 501) * 30f;
             float wx2 = wx + wpX, wz2 = wz + wpZ;
-
             float rug = (OctaveNoise2D(wx2, wz2, 300f, 3, 0.5f, _seed + 2) + 1f) * 0.5f;
             float cont = (OctaveNoise2D(wx2, wz2, 900f, 2, 0.5f, _seed + 3) + 1f) * 0.7f;
-
             float wOcean = SmoothRange(1f - cont, 0.45f, 0.65f);
             float land = 1f - wOcean;
-
             return SmoothRange(rug, 0.50f, 0.70f) * land;
         }
+
         // ════════════════════════════════════════════════════════════════════
         // Biomes
         // ════════════════════════════════════════════════════════════════════
@@ -319,7 +285,6 @@ namespace game
             float h = plainsH * wPlains + forestH * wForest + taigaH * wTaiga
                     + desertH * wDesert + mountainH * wMountains + oceanH * wOcean;
 
-            // Ríos solo en tierra llana (depresión original del heightmap)
             float landWeight = wPlains + wForest + wTaiga;
             if (landWeight > 0.4f)
             {
@@ -334,7 +299,6 @@ namespace game
             return (int)Math.Clamp(h, MinHeight, MaxHeight);
         }
 
-        // Versión simplificada para VLP
         private int GetTerrainHeightVLP(float wx, float wz)
         {
             SoftBiomeWeights(wx, wz, out float wPl, out float wFo, out float wTa,
@@ -396,7 +360,6 @@ namespace game
                 if (cave > CaveThreshold) return BlockType.Air;
             }
             if (wy == terrainH) return GetSurfaceBlock(biome, isRiver, terrainH);
-
             if (wy >= terrainH - 3)
             {
                 return biome switch
@@ -523,15 +486,16 @@ namespace game
         // Low-poly & Very-low-poly
         // ════════════════════════════════════════════════════════════════════
 
-        public byte[,,] GenerateLowPolyChunk(int chunkX, int chunkY, int chunkZ, int chunkSize, int simplificationLevel = 0)
+        public byte[,,] GenerateLowPolyChunk(int chunkX, int chunkY, int chunkZ, int chunkSize,
+                                              int simplificationLevel = 0)
         {
             byte[,,] blocks = new byte[chunkSize, chunkSize, chunkSize];
             int worldX = chunkX * chunkSize, worldY = chunkY * chunkSize, worldZ = chunkZ * chunkSize;
             int area = chunkSize * chunkSize;
 
-            int[] heightsFlat = ArrayPool<int>.Shared.Rent(area);
+            int[] heightsFlat   = ArrayPool<int>.Shared.Rent(area);
             float[] weightsFlat = ArrayPool<float>.Shared.Rent(area * BIOME_COUNT);
-            bool[] riverFlat = ArrayPool<bool>.Shared.Rent(area);
+            bool[] riverFlat    = ArrayPool<bool>.Shared.Rent(area);
 
             try
             {
@@ -540,8 +504,9 @@ namespace game
                     {
                         int idx = bx * chunkSize + bz;
                         float wx = worldX + bx, wz = worldZ + bz;
-                        SoftBiomeWeights(wx, wz, out float wPl, out float wFo, out float wTa,
-                                               out float wDe, out float wMo, out float wOc);
+                        SoftBiomeWeights(wx, wz,
+                            out float wPl, out float wFo, out float wTa,
+                            out float wDe, out float wMo, out float wOc);
                         weightsFlat[idx * BIOME_COUNT + 0] = wPl; weightsFlat[idx * BIOME_COUNT + 1] = wFo;
                         weightsFlat[idx * BIOME_COUNT + 2] = wTa; weightsFlat[idx * BIOME_COUNT + 3] = wDe;
                         weightsFlat[idx * BIOME_COUNT + 4] = wMo; weightsFlat[idx * BIOME_COUNT + 5] = wOc;
@@ -549,7 +514,9 @@ namespace game
                         riverFlat[idx] = ir;
                     }
 
+                // sc = how many sub-surface layers to fill (original logic)
                 int sc = simplificationLevel switch { 0 => 20, 1 => 10, _ => 5 };
+
                 for (int bx = 0; bx < chunkSize; bx++)
                     for (int bz = 0; bz < chunkSize; bz++)
                     {
@@ -559,20 +526,27 @@ namespace game
                         BiomeType biome = DominantBiome(
                             weightsFlat[base_ + 0], weightsFlat[base_ + 1], weightsFlat[base_ + 2],
                             weightsFlat[base_ + 3], weightsFlat[base_ + 4], weightsFlat[base_ + 5]);
+
                         for (int by = 0; by < chunkSize; by++)
                         {
                             int wy = worldY + by;
                             if (wy < SeaLevel) continue;
-                            if (wy >= h - sc && wy <= h) blocks[bx, by, bz] = wy == h ? GetSurfaceBlock(biome, ir, h) : BlockType.Dirt;
-                            else if (wy >= SeaLevel && wy < h - sc) blocks[bx, by, bz] = BlockType.Stone;
-                            else if (wy <= SeaLevel && wy > h) blocks[bx, by, bz] = BlockType.Water;
+                            if (wy >= h - sc && wy <= h)
+                                blocks[bx, by, bz] = wy == h
+                                    ? GetSurfaceBlock(biome, ir, h)
+                                    : BlockType.Dirt;
+                            else if (wy >= SeaLevel && wy < h - sc)
+                                blocks[bx, by, bz] = BlockType.Stone;
+                            else if (wy <= SeaLevel && wy > h)
+                                blocks[bx, by, bz] = BlockType.Water;
                         }
                     }
 
                 if (simplificationLevel == 0)
                     PaintRiverBeds(blocks, worldX, worldY, worldZ, chunkSize, heightsFlat, riverFlat);
 
-                PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize, heightsFlat, weightsFlat, riverFlat, simplificationLevel);
+                PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize,
+                           heightsFlat, weightsFlat, riverFlat, simplificationLevel);
 
                 if (simplificationLevel == 0)
                 {
