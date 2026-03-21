@@ -23,6 +23,13 @@ namespace game
         private ChunkManager _chunkManager;
         private int _loadDistance = 10;
 
+        // ── Third-person mode ─────────────────────────────────────────
+        private bool _thirdPerson = false;
+        private bool _lastF5 = false;
+        private ThirdPersonCamera _tpCamera;
+        private PlayerController _player;
+        private PlayerRenderer _playerRenderer;
+
         private ProceduralSkybox _skybox;
         private Effect _skyEffect;
 
@@ -100,6 +107,18 @@ namespace game
                                              chunkSize: 32,
                                              loadDistance: _loadDistance);
 
+            // ── Third-person ──────────────────────────────────────────
+            _tpCamera = new ThirdPersonCamera(GraphicsDevice, aspect,
+                fovDegrees: 90f,
+                nearPlane: 0.1f,
+                farPlane: 100000f,
+                chunkManager: _chunkManager);
+
+            // ← THIS was missing – player was never constructed
+            _player = new PlayerController(
+                startPosition: new Vector3(0, 62, 0),
+                chunkManager: _chunkManager);
+
             _solidState = new RasterizerState { CullMode = CullMode.CullClockwiseFace, FillMode = FillMode.Solid };
             _wireframeState = new RasterizerState { CullMode = CullMode.CullClockwiseFace, FillMode = FillMode.WireFrame };
 
@@ -110,7 +129,6 @@ namespace game
         {
             _spriteBatch = new SpriteBatch(GraphicsDevice);
 
-            // ── Opaque voxel shader ───────────────────────────────────
             _voxelFx = Content.Load<Effect>("VoxelLit");
             _voxelEffect = new VoxelLitEffect(_voxelFx);
             _voxelEffect.FogEnabled = true;
@@ -121,8 +139,7 @@ namespace game
             _voxelEffect.CameraLightIntensity = _cameraLightIntensity;
             _voxelEffect.CameraLightColor = new Vector3(1f, 0.92f, 0.75f);
 
-            // ── Water shader ──────────────────────────────────────────
-            _waterFx = Content.Load<Effect>("Water");   // Water.fx → Content/Water.fx
+            _waterFx = Content.Load<Effect>("Water");
             _waterEffect = new WaterEffect(_waterFx);
             _waterEffect.WaterAlpha = 0.3f;
             _waterEffect.FogEnabled = true;
@@ -166,6 +183,8 @@ namespace game
             _pauseMenu.OnResume += () => { IsMouseVisible = false; };
             _pauseMenu.OnExit += () => Exit();
             _pauseMenu.OnSettingsChanged += ApplySettings;
+
+            _playerRenderer = new PlayerRenderer(GraphicsDevice);
         }
 
         private void ApplySettings(GameSettings s)
@@ -176,6 +195,7 @@ namespace game
             float aspect = (float)GraphicsDevice.Viewport.Width /
                                    GraphicsDevice.Viewport.Height;
             _camera.SetFov(MathHelper.ToRadians(s.FovDegrees), aspect);
+            _tpCamera?.SetFov(MathHelper.ToRadians(s.FovDegrees), aspect);
 
             _voxelEffect.FogEnabled = s.FogEnabled;
             _waterEffect.FogEnabled = s.FogEnabled;
@@ -202,23 +222,26 @@ namespace game
             _voxelEffect.CameraLightIntensity = _cameraLightIntensity;
 
             if (s.LoadDistance != _loadDistance
-            || s.AoStrength != GreedyMesher.AoStrength
-            || s.FancyWater != _chunkManager.FancyWater
-            )
+             || s.AoStrength != GreedyMesher.AoStrength
+             || s.FancyWater != _chunkManager.FancyWater)
             {
                 _loadDistance = s.LoadDistance;
                 _chunkManager.Dispose();
                 _chunkManager = new ChunkManager(GraphicsDevice,
                                                  chunkSize: 32,
                                                  loadDistance: _loadDistance);
+                _player = new PlayerController(_player.Position, _chunkManager);
+                _tpCamera = new ThirdPersonCamera(GraphicsDevice, aspect,
+                    fovDegrees: s.FovDegrees,
+                    nearPlane: 0.1f,
+                    farPlane: 100000f,
+                    chunkManager: _chunkManager);
             }
 
             float fs = _loadDistance * 2 * 24f;
             float fe = _loadDistance * 2 * 36f;
-            _voxelEffect.FogStart = fs;
-            _voxelEffect.FogEnd = fe;
-            _waterEffect.FogStart = fs;
-            _waterEffect.FogEnd = fe;
+            _voxelEffect.FogStart = fs; _voxelEffect.FogEnd = fe;
+            _waterEffect.FogStart = fs; _waterEffect.FogEnd = fe;
 
             _chunkManager.EnableVeryLowPoly = s.EnableVeryLowPoly;
             _chunkManager.FancyWater = s.FancyWater;
@@ -237,7 +260,9 @@ namespace game
                 else { _pauseMenu.Open(); IsMouseVisible = true; }
             }
             _lastEscape = escNow;
-            _chunkManager.Update(_camera.Position, null);
+
+            Vector3 worldPos = _thirdPerson ? _player.Position : _camera.Position;
+            _chunkManager.Update(worldPos, null);
 
             if (_pauseMenu.IsOpen)
             {
@@ -255,14 +280,39 @@ namespace game
             if (t && !_lastT) _wireframeMode = !_wireframeMode;
             _lastT = t;
 
-            _camera.Update(gameTime);
-            _skybox.Update(gameTime);
+            // ── F5 – toggle camera mode ───────────────────────────────
+            bool f5 = keys.IsKeyDown(Keys.F5);
+            if (f5 && !_lastF5)
+            {
+                _thirdPerson = !_thirdPerson;
+                if (_thirdPerson)
+                {
+                    _player.Position = _camera.Position - new Vector3(0, PlayerController.Height, 0);
+                    _player.Velocity = Vector3.Zero;
+                    _tpCamera.ResetMouseState();
+                }
+                else
+                {
+                    _camera.Position = _player.Position + new Vector3(0, PlayerController.Height * 0.9f, 0);
+                }
+            }
+            _lastF5 = f5;
 
-            // ── Water time counter ────────────────────────────────────
+            // ── Update camera / player ────────────────────────────────
+            if (_thirdPerson)
+            {
+                _tpCamera.Update(gameTime, _player.Position);
+                _player.Update(gameTime, _tpCamera.PlayerFacingYaw);
+            }
+            else
+            {
+                _camera.Update(gameTime);
+            }
+
+            _skybox.Update(gameTime);
             _waterTime += (float)gameTime.ElapsedGameTime.TotalSeconds;
             _waterEffect.Time = _waterTime;
 
-            // ── Sync shaders from sky ─────────────────────────────────
             _voxelEffect.ApplyFromSkybox(_skybox);
             _waterEffect.ApplyFromSkybox(_skybox);
 
@@ -273,12 +323,12 @@ namespace game
                 _waterEffect.FogColor = fogCol;
             }
 
-            _voxelEffect.SetCameraPosition(_camera.Position);
-            _waterEffect.SetCameraPosition(_camera.Position);
+            Vector3 shaderCamPos = _thirdPerson ? _tpCamera.EyePosition : _camera.Position;
+            _voxelEffect.SetCameraPosition(shaderCamPos);
+            _waterEffect.SetCameraPosition(shaderCamPos);
 
             UploadEmissiveLights();
 
-            // ── FPS ───────────────────────────────────────────────────
             double elapsed = _frameTimer.Elapsed.TotalMilliseconds;
             _frameTimer.Restart();
             if (elapsed > 0 && elapsed < 2000)
@@ -336,7 +386,12 @@ namespace game
             GraphicsDevice.DepthStencilState = DepthStencilState.Default;
             GraphicsDevice.BlendState = BlendState.Opaque;
 
-            _skybox.Draw(_camera);
+            // ── Resolve active camera ─────────────────────────────────
+            Matrix activeView = _thirdPerson ? _tpCamera.ViewMatrix : _camera.ViewMatrix;
+            Matrix activeProj = _thirdPerson ? _tpCamera.ProjectionMatrix : _camera.ProjectionMatrix;
+            Vector3 activeCamPos = _thirdPerson ? _tpCamera.EyePosition : _camera.Position;
+            BoundingFrustum activeFrustum = _thirdPerson ? _tpCamera.GetFrustum() : _camera.GetFrustum();
+            _skybox.Draw(activeView, activeProj, activeCamPos);
 
             GraphicsDevice.DepthStencilState = DepthStencilState.Default;
             GraphicsDevice.BlendState = BlendState.Opaque;
@@ -346,49 +401,58 @@ namespace game
             // ─────────────────────────────────────────────────────────
             GraphicsDevice.RasterizerState = _wireframeMode ? _wireframeState : _solidState;
 
-            _voxelEffect.View = _camera.ViewMatrix;
-            _voxelEffect.Projection = _camera.ProjectionMatrix;
-
-            var frustum = _camera.GetFrustum();
+            _voxelEffect.View = activeView;
+            _voxelEffect.Projection = activeProj;
 
             if (_wireframeMode)
             {
-                var cur = _chunkManager.GetChunkCoordinates(_camera.Position);
-                _chunkManager.Draw(_voxelEffect, frustum, cur, wireframeOnly: true);
+                var cur = _chunkManager.GetChunkCoordinates(activeCamPos);
+                _chunkManager.Draw(_voxelEffect, activeFrustum, cur, wireframeOnly: true);
             }
             else
             {
-                _chunkManager.Draw(_voxelEffect, frustum);
+                _chunkManager.Draw(_voxelEffect, activeFrustum);
             }
+
+            // ─────────────────────────────────────────────────────────
+            //  PASS 2/3 – Water
+            // ─────────────────────────────────────────────────────────
             if (_fancyWater)
             {
-                _waterEffect.View = _camera.ViewMatrix;
-                _waterEffect.Projection = _camera.ProjectionMatrix;
+                _waterEffect.View = activeView;
+                _waterEffect.Projection = activeProj;
 
                 GraphicsDevice.DepthStencilState = DepthStencilState.Default;
                 GraphicsDevice.BlendState = BlendState.Opaque;
                 GraphicsDevice.RasterizerState = new RasterizerState
-                {
-                    CullMode = CullMode.CullClockwiseFace,
-                    FillMode = FillMode.Solid
-                };
-                _chunkManager.DrawWater(_waterEffect, frustum);
+                { CullMode = CullMode.CullClockwiseFace, FillMode = FillMode.Solid };
+                _chunkManager.DrawWater(_waterEffect, activeFrustum);
 
-                // PASS 3 – Agua transparente (worldY <= SeaLevel: océano)
                 GraphicsDevice.DepthStencilState = DepthStencilState.DepthRead;
                 GraphicsDevice.BlendState = BlendState.AlphaBlend;
                 GraphicsDevice.RasterizerState = new RasterizerState
-                {
-                    CullMode = CullMode.None,
-                    FillMode = FillMode.Solid
-                };
-                _chunkManager.DrawRiver(_waterEffect, frustum);
+                { CullMode = CullMode.None, FillMode = FillMode.Solid };
+                _chunkManager.DrawRiver(_waterEffect, activeFrustum);
 
-                // Restaurar
                 GraphicsDevice.DepthStencilState = DepthStencilState.Default;
                 GraphicsDevice.BlendState = BlendState.Opaque;
                 GraphicsDevice.RasterizerState = _solidState;
             }
+
+            // ── Player mesh (third-person only) ───────────────────────
+            if (_thirdPerson)
+            {
+                _playerRenderer.Draw(
+                    feetPos: _player.Position,
+                    bodyYaw: _player.BodyYaw,
+                    headYawOffset: _player.HeadYawOffset,
+                    view: activeView,
+                    proj: activeProj,
+                    isGrounded: _player.IsGrounded,
+                    velocity: _player.Velocity,
+                    gameTime: gameTime);
+            }
+
             // ─────────────────────────────────────────────────────────
             //  HUD
             // ─────────────────────────────────────────────────────────
@@ -415,11 +479,15 @@ namespace game
             string fpsStr = $"{_smoothFps:F0} fps";
             Vector2 sz = _debugFont.MeasureString(fpsStr);
             DrawTS(fpsStr, new Vector2(vw - sz.X - 8, 8), fpsCol);
+
+            string modeStr = _thirdPerson ? "[3P]" : "[FC]";
+            DrawTS(modeStr, new Vector2(vw - sz.X - 8, 8 + LineH),
+                   _thirdPerson ? CWarn : CGood);
         }
 
         private void DrawF3Hud()
         {
-            Vector3 pos = _camera.Position;
+            Vector3 pos = _thirdPerson ? _player.Position : _camera.Position;
             var chunkPos = _chunkManager.GetChunkCoordinates(pos);
             var curChunk = _chunkManager.GetChunk(chunkPos);
             int lx = ((int)Math.Floor(pos.X) % 32 + 32) % 32;
@@ -430,6 +498,8 @@ namespace game
             var R = new List<(string lbl, string val, Color col)>();
 
             L.Add(("", "Voxel Engine", CHeader));
+            L.Add(("mode", _thirdPerson ? "3rd person [F5]" : "free cam   [F5]",
+                   _thirdPerson ? CWarn : CGood));
             L.Add(("", "", CLabel));
             Color fc = FpsColor(_smoothFps);
             L.Add(("fps", $"{_smoothFps:F1}", fc));
@@ -439,17 +509,24 @@ namespace game
             L.Add(("x", $"{pos.X:F3}", CValue));
             L.Add(("y", $"{pos.Y:F3}", CValue));
             L.Add(("z", $"{pos.Z:F3}", CValue));
+
+            if (_thirdPerson)
+            {
+                L.Add(("", "", CLabel));
+                L.Add(("", "[ Player ]", CHeader));
+                L.Add(("grounded", _player.IsGrounded ? "yes" : "no",
+                       _player.IsGrounded ? CGood : CWarn));
+                L.Add(("vel y", $"{_player.Velocity.Y:F2}", CValue));
+            }
+
             L.Add(("", "", CLabel));
             L.Add(("", "[ Chunk ]", CHeader));
             L.Add(("chunk", $"{chunkPos.X}, {chunkPos.Y}, {chunkPos.Z}", CValue));
             L.Add(("local", $"{lx}, {ly}, {lz}", CValue));
             L.Add(("", "", CLabel));
-            L.Add(("", "[ Camera ]", CHeader));
             L.Add(("cam light", _cameraLightEnabled ? $"ON  r={_cameraLightRadius:F0}" : "off",
                    _cameraLightEnabled ? CGood : CLabel));
-            L.Add(("", "", CLabel));
             L.Add(("water time", $"{_waterTime:F1}s", CValue));
-            L.Add(("", "", CLabel));
             L.Add(("wireframe", _wireframeMode ? "ON  [T]" : "off [T]",
                    _wireframeMode ? CWarn : CLabel));
 
@@ -457,11 +534,11 @@ namespace game
             R.Add(("chunk size", "32x32x32", CValue));
             R.Add(("HQ dist", $"{_loadDistance} chunks", CValue));
             R.Add(("LP dist", $"{_loadDistance * 4} chunks", CValue));
-            if (_pauseMenu.Settings.EnableVeryLowPoly) R.Add(("VLP dist", $"{_loadDistance * 4 + 4} chunks", CValue));
+            if (_pauseMenu.Settings.EnableVeryLowPoly)
+                R.Add(("VLP dist", $"{_loadDistance * 4 + 4} chunks", CValue));
 
             float tod = _skybox.TimeOfDay;
-            int hh = (int)tod;
-            int mm = (int)((tod - hh) * 60f);
+            int hh = (int)tod, mm = (int)((tod - hh) * 60f);
             R.Add(("", "", CLabel));
             R.Add(("", "[ Time of Day ]", CHeader));
             R.Add(("time", $"{hh:00}:{mm:00}", CValue));
@@ -488,9 +565,9 @@ namespace game
             if (curChunk != null)
             {
                 R.Add(("mesh", curChunk.HasMesh ? "ready" : "building",
-                       curChunk.HasMesh ? CGood : CWarn));
+                        curChunk.HasMesh ? CGood : CWarn));
                 R.Add(("water mesh", curChunk.HasWaterMesh ? "ready" : "none",
-                       curChunk.HasWaterMesh ? new Color(80, 160, 255) : CLabel));
+                        curChunk.HasWaterMesh ? new Color(80, 160, 255) : CLabel));
                 if (curChunk.DebugInfo != null)
                 {
                     var di = curChunk.DebugInfo;
@@ -513,7 +590,7 @@ namespace game
             y = PadY;
             foreach (var (lbl, val, col) in R) { DrawLine(vw - ColW - PadX, y, lbl, val, col); y += LineH; }
 
-            DrawCrosshair();
+            if (!_thirdPerson) DrawCrosshair();
         }
 
         private void DrawLine(int x, int y, string lbl, string val, Color col)
@@ -537,11 +614,11 @@ namespace game
         {
             int cx = GraphicsDevice.Viewport.Width / 2;
             int cy = GraphicsDevice.Viewport.Height / 2;
-            const int s = 7, t = 1;
-            _spriteBatch.Draw(_pixel, new Rectangle(cx - s - 1, cy - t - 1, s * 2 + 2, t * 2 + 3), Color.Black * 0.5f);
-            _spriteBatch.Draw(_pixel, new Rectangle(cx - t - 1, cy - s - 1, t * 2 + 3, s * 2 + 2), Color.Black * 0.5f);
-            _spriteBatch.Draw(_pixel, new Rectangle(cx - s, cy - t, s * 2, t * 2 + 1), Color.White * 0.9f);
-            _spriteBatch.Draw(_pixel, new Rectangle(cx - t, cy - s, t * 2 + 1, s * 2), Color.White * 0.9f);
+            const int s = 7, th = 1;
+            _spriteBatch.Draw(_pixel, new Rectangle(cx - s - 1, cy - th - 1, s * 2 + 2, th * 2 + 3), Color.Black * 0.5f);
+            _spriteBatch.Draw(_pixel, new Rectangle(cx - th - 1, cy - s - 1, th * 2 + 3, s * 2 + 2), Color.Black * 0.5f);
+            _spriteBatch.Draw(_pixel, new Rectangle(cx - s, cy - th, s * 2, th * 2 + 1), Color.White * 0.9f);
+            _spriteBatch.Draw(_pixel, new Rectangle(cx - th, cy - s, th * 2 + 1, s * 2), Color.White * 0.9f);
         }
 
         private static Color FpsColor(float fps)
@@ -557,6 +634,7 @@ namespace game
                 _skybox?.Dispose();
                 _skyEffect?.Dispose();
                 _waterFx?.Dispose();
+                _playerRenderer?.Dispose();
                 _spriteBatch?.Dispose();
                 _pixel?.Dispose();
             }

@@ -28,30 +28,38 @@ namespace game
             _timeOfDay += dt * (24f / DayDurationSeconds);
             if (_timeOfDay >= 24f) _timeOfDay -= 24f;
         }
-        public void Draw(Camera camera)
+        public void Draw(Matrix view, Matrix projection, Vector3 eyePosition)
         {
+            // El cubo se traslada al ojo → la view matrix lo lleva de vuelta
+            // al origen → el cielo siempre rodea al observador sin importar
+            // dónde esté en el mundo.
             Matrix world = Matrix.CreateScale(500f) *
-                           Matrix.CreateTranslation(camera.Position);
+                           Matrix.CreateTranslation(eyePosition);
+
             Vector3 sunDir = GetSunDirection();
             Vector3 moonDir = -sunDir;
+
             TrySet("World", world);
-            TrySet("View", camera.ViewMatrix);
-            TrySet("Projection", camera.ProjectionMatrix);
+            TrySet("View", view);
+            TrySet("Projection", projection);
             TrySet("Time", _time);
             TrySet("TimeOfDay", _timeOfDay);
             TrySet("SunDirection", sunDir);
             TrySet("MoonDirection", moonDir);
+
             var oldDepth = _gd.DepthStencilState;
             var oldRaster = _gd.RasterizerState;
             _gd.DepthStencilState = DepthStencilState.None;
             _gd.RasterizerState = RasterizerState.CullNone;
             _gd.SetVertexBuffer(_vb);
             _gd.Indices = _ib;
+
             foreach (EffectPass pass in _skyEffect.CurrentTechnique.Passes)
             {
                 pass.Apply();
                 _gd.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, 12);
             }
+
             _gd.DepthStencilState = oldDepth;
             _gd.RasterizerState = oldRaster;
         }

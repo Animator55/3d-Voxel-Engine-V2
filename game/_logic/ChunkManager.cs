@@ -826,14 +826,19 @@ namespace game
             var cp = GetChunkCoordinates(worldPos);
             var chunk = GetChunk(cp);
             if (chunk == null) return BlockType.Air;
-            int lx = (int)worldPos.X % _chunkSize,
-                ly = (int)worldPos.Y % _chunkSize,
-                lz = (int)worldPos.Z % _chunkSize;
-            if (lx < 0) lx += _chunkSize;
-            if (ly < 0) ly += _chunkSize;
-            if (lz < 0) lz += _chunkSize;
+
+            // Floor-mod: safe for negative world coordinates.
+            int lx = FloorMod((int)Math.Floor(worldPos.X), _chunkSize);
+            int ly = FloorMod((int)Math.Floor(worldPos.Y), _chunkSize);
+            int lz = FloorMod((int)Math.Floor(worldPos.Z), _chunkSize);
+
             return chunk.GetBlock(lx, ly, lz);
         }
+        private static int FloorMod(int n, int d)
+        {
+            return ((n % d) + d) % d;
+        }
+
 
         public int LoadedChunkCount
         {
