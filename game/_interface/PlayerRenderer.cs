@@ -4,48 +4,86 @@ using System;
 
 namespace game
 {
-    /// <summary>
-    /// Veloren / Cube World style blocky player.
-    /// Body (torso + legs + arms) rotates toward movement direction (BodyYaw).
-    /// Head rotates toward camera direction, clamped to ±90° of body (HeadYawOffset).
-    /// </summary>
-    public class PlayerRenderer : IDisposable
+    public enum SwordMode
     {
-        // ── Palette ────────────────────────────────────────────────────
-        private static readonly Color CSkin      = new Color(255, 213, 170);
-        private static readonly Color CSkinShade = new Color(215, 170, 130);
-        private static readonly Color CSkinDark  = new Color(180, 135, 100);
+        Sheathed,
+        Drawing,
+        Holding,
+        Attacking,
+        Sheathing,
+    }
 
-        private static readonly Color CHair      = new Color(55,  32,  10);
-        private static readonly Color CHairDark  = new Color(38,  22,   6);
+    /// <summary>
+    /// Cube World chibi player con espada.
+    ///
+    /// API pública:
+    ///   RequestAttack()  — llamar en MouseButton.Left pressed.
+    ///   RequestSheathe() — llamar en MouseButton.Right pressed (o automático).
+    ///   SwordMode Mode   — estado actual (lectura).
+    ///   HitStopTimer     — > 0 durante hitstop (útil para shake de cámara).
+    ///
+    /// La clase usa partial para dividir responsabilidades:
+    ///   PlayerRenderer.cs      — núcleo: estado, Draw, cuerpo, primitivas.
+    ///   SwordRenderer.cs       — geometría de la espada y sus posiciones.
+    ///   AttackRenderer.cs      — frames de ataque y deformaciones corporales.
+    /// </summary>
+    public partial class PlayerRenderer : IDisposable
+    {
+        // ── Duraciones ────────────────────────────────────────────────
+        private const float DrawDuration    = 0.14f;
+        private const float SheathDuration  = 0.18f;
+        private const float HoldAutoSheathe = 6.0f;
+        private const float AttackDuration  = 0.18f;
+        private const float HitStopDuration = 0.04f;
+        private const int   ComboLength     = 3;
 
-        private static readonly Color CEyeWhite  = new Color(240, 240, 240);
-        private static readonly Color CEyeIris   = new Color(60, 100, 200);
-        private static readonly Color CEyePupil  = new Color(20,  20,  40);
-
-        private static readonly Color CTunic     = new Color( 80, 130, 200);
-        private static readonly Color CTunicDark = new Color( 50,  90, 155);
-        private static readonly Color CTunicSide = new Color( 60, 110, 175);
-
-        private static readonly Color CBelt      = new Color(120,  80,  35);
-        private static readonly Color CBeltDark  = new Color( 80,  50,  20);
-
-        private static readonly Color CPants     = new Color( 55,  55, 110);
-        private static readonly Color CPantsDark = new Color( 35,  35,  80);
-
-        private static readonly Color CBoot      = new Color(100,  65,  28);
-        private static readonly Color CBootDark  = new Color( 65,  40,  15);
-        private static readonly Color CBootSole  = new Color( 45,  28,  10);
-
-        // ── Scale ──────────────────────────────────────────────────────
-        private const float S         = 0.075f;
+        // ── Escala ────────────────────────────────────────────────────
+        private const float S         = 0.068f;
         private const float MoveSpeed = 6f;
+        private const float ArmLen    = 4.4f * S;
 
+        // ── Paleta personaje ──────────────────────────────────────────
+        private static readonly Color CSkin      = new Color(240, 200, 160);
+        private static readonly Color CSkinShade = new Color(205, 165, 125);
+        private static readonly Color CSkinDark  = new Color(170, 128,  90);
+
+        private static readonly Color CHair      = new Color(255, 210,  40);
+        private static readonly Color CHairMid   = new Color(220, 175,  20);
+        private static readonly Color CHairDark  = new Color(175, 135,  10);
+
+        private static readonly Color CEyeBlack  = new Color( 20,  18,  22);
+        private static readonly Color CEyeBlue   = new Color( 60, 120, 230);
+        private static readonly Color CEyeWhite  = new Color(235, 235, 240);
+
+        private static readonly Color CTunic     = new Color(115,  85, 165);
+        private static readonly Color CTunicMid  = new Color( 90,  65, 135);
+        private static readonly Color CTunicDark = new Color( 65,  45, 105);
+
+        private static readonly Color CCollar    = new Color( 80, 145,  70);
+        private static readonly Color CCollarDk  = new Color( 55, 105,  48);
+
+        private static readonly Color CBuckle    = new Color(195, 195, 200);
+        private static readonly Color CBuckleDk  = new Color(140, 140, 148);
+
+        private static readonly Color CBoot      = new Color( 68,  65,  72);
+        private static readonly Color CBootMid   = new Color( 50,  48,  55);
+        private static readonly Color CBootDark  = new Color( 32,  30,  36);
+        private static readonly Color CBootSole  = new Color( 24,  22,  28);
+
+        // ── Estado ────────────────────────────────────────────────────
+        public  SwordMode Mode         { get; private set; } = SwordMode.Sheathed;
+        public  float     HitStopTimer { get; private set; } = 0f;
+        private float     _stateTimer    = 0f;
+        private int       _comboStep     = 0;
+        private bool      _pendingAttack = false;
+        private bool      _inHitStop     = false;
+
+        // ── GFX ───────────────────────────────────────────────────────
         private readonly GraphicsDevice _gd;
         private BasicEffect _effect;
 
-        private readonly VertexPositionColor[] _verts = new VertexPositionColor[4096];
-        private readonly short[]               _idx   = new short[8192];
+        private readonly VertexPositionColor[] _verts = new VertexPositionColor[131072];
+        private readonly short[]               _idx   = new short[262144];
         private int _vc, _ic;
 
         public PlayerRenderer(GraphicsDevice gd)
@@ -59,79 +97,132 @@ namespace game
             };
         }
 
-        // ──────────────────────────────────────────────────────────────
-        /// <param name="bodyYaw">      PlayerController.BodyYaw      </param>
-        /// <param name="headYawOffset">PlayerController.HeadYawOffset </param>
+        // ─────────────────────────────────────────────────────────────
+        //  API pública
+        // ─────────────────────────────────────────────────────────────
+
+        public void RequestAttack()
+        {
+            switch (Mode)
+            {
+                case SwordMode.Sheathed:
+                case SwordMode.Sheathing:
+                    Mode           = SwordMode.Drawing;
+                    _stateTimer    = 0f;
+                    _pendingAttack = true;
+                    break;
+                case SwordMode.Drawing:
+                    _pendingAttack = true;
+                    break;
+                case SwordMode.Holding:
+                    _comboStep  = 0;
+                    Mode        = SwordMode.Attacking;
+                    _stateTimer = 0f;
+                    _inHitStop  = false;
+                    break;
+                case SwordMode.Attacking:
+                    if (_comboStep < ComboLength - 1)
+                        _pendingAttack = true;
+                    break;
+            }
+        }
+
+        public void RequestSheathe()
+        {
+            if (Mode == SwordMode.Holding || Mode == SwordMode.Attacking)
+            {
+                Mode           = SwordMode.Sheathing;
+                _stateTimer    = 0f;
+                _pendingAttack = false;
+                _inHitStop     = false;
+                HitStopTimer   = 0f;
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        //  Draw
+        // ─────────────────────────────────────────────────────────────
         public void Draw(Vector3 feetPos,
-                         float bodyYaw,
-                         float headYawOffset,
+                         float bodyYaw, float headYawOffset,
                          Matrix view, Matrix proj,
                          bool isGrounded, Vector3 velocity,
-                         GameTime gameTime)
+                         GameTime gameTime,
+                         bool isMoving = false)   // ← NUEVO parámetro
         {
             _vc = _ic = 0;
 
+            float dt    = (float)gameTime.ElapsedGameTime.TotalSeconds;
             float time  = (float)gameTime.TotalGameTime.TotalSeconds;
             float hspd  = (float)Math.Sqrt(velocity.X * velocity.X + velocity.Z * velocity.Z);
             float walkT = isGrounded ? Math.Min(hspd / MoveSpeed, 1f) : 0f;
-            float runT  = Math.Min(hspd / (MoveSpeed * 1.8f), 1f);
 
-            float walkPhase = time * 8f;
-            float swing     = (float)Math.Sin(walkPhase) * walkT;
-            float swingFast = (float)Math.Sin(walkPhase) * runT * 1.3f;
-            float bob       = (float)Math.Abs(Math.Sin(walkPhase * 2f)) * walkT * 0.025f;
-            float airLean   = !isGrounded && hspd > 1f ? 0.12f : 0f;
+            // ── Pose en el aire ───────────────────────────────────────
+            // Si el jugador está en el aire con input activo, congelamos
+            // walkPhase en π/2 (pico del seno = zancada más extendida) y
+            // forzamos walkT a 1 para que la pose sea completamente visible.
+            bool airWithInput = !isGrounded && isMoving;
 
-            // Body rotation (torso, legs, arms)
-            Matrix bodyRot = Matrix.CreateRotationY(bodyYaw)
-                           * Matrix.CreateRotationX(-airLean);
+            float walkPhase;
+            if (airWithInput)
+            {
+                walkPhase = MathHelper.PiOver2;   // congela en el paso más extendido
+                walkT     = 1f;                   // pose completamente aplicada
+            }
+            else
+            {
+                walkPhase = time * 16f;
+                // walkT ya está calculado arriba (0 en el aire sin input)
+            }
 
-            // Head rotation = body + offset toward camera
-            Matrix headRot = Matrix.CreateRotationY(bodyYaw + headYawOffset);
+            float swing = (float)Math.Sin(walkPhase) * walkT;
+            float bob   = (float)Math.Abs(Math.Sin(walkPhase * 2f)) * walkT * 0.022f;
 
-            // ── Layout ────────────────────────────────────────────────
-            const float legH  = 8 * S;
-            const float bodyH = 8 * S;
-            const float neckH = 1 * S;
+            UpdateSwordState(dt);
 
-            float legBot  = 0f;
-            float bodyBot = legBot  + legH;
-            float neckBot = bodyBot + bodyH;
-            float headBot = neckBot + neckH;
+            // rawP normalizado del ataque actual, 0 fuera de ataque
+            float rawP = (Mode == SwordMode.Attacking)
+                       ? MathHelper.Clamp(_stateTimer / AttackDuration, 0f, 1f)
+                       : 0f;
 
-            // ── Boots ─────────────────────────────────────────────────
-            BuildBoot(-2f * S, legBot,  swing, bodyRot, feetPos, bob);
-            BuildBoot( 2f * S, legBot, -swing, bodyRot, feetPos, bob);
+            // ── Deformaciones de combate ──────────────────────────────
+            float bodyLeanX, bodyLeanZ, bodyYawOff, feetSpreadExtra;
+            float headLookZ, headNodX, impactShake;
 
-            // ── Legs ──────────────────────────────────────────────────
-            BuildLeg(-2f * S, legBot + 1 * S,  swing, bodyRot, feetPos, bob);
-            BuildLeg( 2f * S, legBot + 1 * S, -swing, bodyRot, feetPos, bob);
+            if (Mode == SwordMode.Attacking || Mode == SwordMode.Drawing || Mode == SwordMode.Sheathing)
+            {
+                GetCombatBodyOffsets(rawP,
+                    out bodyLeanX, out bodyLeanZ, out bodyYawOff,
+                    out feetSpreadExtra, out headLookZ, out headNodX, out impactShake);
+            }
+            else
+            {
+                bodyLeanX = bodyLeanZ = bodyYawOff = 0f;
+                feetSpreadExtra = headLookZ = headNodX = impactShake = 0f;
+            }
 
-            // ── Belt ──────────────────────────────────────────────────
-            const float beltW = 8 * S, beltH = 1.5f * S, beltD = 4 * S;
-            AddBox(-beltW * .5f, bodyBot, -beltD * .5f,
-                    beltW * .5f, bodyBot + beltH, beltD * .5f,
-                   Vector3.Zero, Matrix.Identity, bodyRot, feetPos, bob,
-                   CBelt, CBeltDark);
+            // ── Matrices con deformación ──────────────────────────────
+            Matrix bodyRot = Matrix.CreateRotationX(bodyLeanX)
+                           * Matrix.CreateRotationZ(bodyLeanZ)
+                           * Matrix.CreateRotationY(bodyYaw + bodyYawOff);
 
-            // ── Torso ─────────────────────────────────────────────────
-            const float torsoW = 8 * S, torsoD = 4 * S;
-            float torsoBot = bodyBot + beltH;
-            float torsoTop = bodyBot + bodyH;
-            AddBox(-torsoW * .5f, torsoBot, -torsoD * .5f,
-                    torsoW * .5f, torsoTop,  torsoD * .5f,
-                   Vector3.Zero, Matrix.Identity, bodyRot, feetPos, bob,
-                   CTunic, CTunicDark, CTunicSide);
+            Matrix headRot = Matrix.CreateRotationX(headNodX)
+                           * Matrix.CreateRotationZ(headLookZ)
+                           * Matrix.CreateRotationY(bodyYaw + bodyYawOff * 0.5f + headYawOffset);
 
-            // ── Arms ──────────────────────────────────────────────────
-            float armTopY = torsoTop - 0.5f * S;
-            BuildArm(-4.5f * S, armTopY,  swingFast, bodyRot, feetPos, bob);
-            BuildArm( 4.5f * S, armTopY, -swingFast, bodyRot, feetPos, bob);
+            const float bootH = 2.8f * S;
+            const float bodyH = 5.5f * S;
+            float bodyBot = bootH;
+            float bodyTop = bodyBot + bodyH;
+            float headBot = bodyTop - 0.3f * S;
 
-            // ── Head (uses headRot instead of bodyRot) ─────────────────
-            BuildHead(headBot, headRot, feetPos, bob);
+            float activeBob = (Mode == SwordMode.Attacking) ? impactShake : bob;
 
-            // ── Render ───────────────────────────────────────────────
+            BuildVoxelFoot(-2.2f * S - feetSpreadExtra, 0f,  swing, bodyRot, feetPos, activeBob);
+            BuildVoxelFoot( 2.2f * S + feetSpreadExtra, 0f, -swing, bodyRot, feetPos, activeBob);
+            BuildVoxelBody(bodyBot, bodyTop, bodyRot, feetPos, activeBob);
+            BuildVoxelHead(headBot, headRot, feetPos, activeBob);
+            BuildArmsAndSword(bodyTop, swing, bodyRot, feetPos, activeBob, time);
+
             if (_vc == 0) return;
 
             _effect.View       = view;
@@ -152,172 +243,390 @@ namespace game
             }
         }
 
-        // ──────────────────────────────────────────────────────────────
-        //  Part builders
-        // ──────────────────────────────────────────────────────────────
-
-        private void BuildBoot(float localX, float botY, float swing,
-                                Matrix bodyRot, Vector3 feetWorld, float bob)
+        // ─────────────────────────────────────────────────────────────
+        //  Máquina de estados
+        // ─────────────────────────────────────────────────────────────
+        private void UpdateSwordState(float dt)
         {
-            const int W = 4, H = 2, D = 4;
-            float hw = W * 0.5f * S, hd = D * 0.5f * S;
-            float y0 = botY, y1 = botY + H * S;
-            var pivot  = new Vector3(localX, y1, 0);
-            var swingM = Matrix.CreateRotationX(swing * 0.28f);
-            AddBox(localX - hw, y0,             -hd, localX + hw, y0 + 0.5f * S, hd,
-                   pivot, swingM, bodyRot, feetWorld, bob, CBootSole, CBootSole);
-            AddBox(localX - hw, y0 + 0.5f * S, -hd, localX + hw, y1, hd,
-                   pivot, swingM, bodyRot, feetWorld, bob, CBoot, CBootDark);
+            if (HitStopTimer > 0f)
+            {
+                HitStopTimer -= dt;
+                return;
+            }
+
+            _stateTimer += dt;
+
+            switch (Mode)
+            {
+                case SwordMode.Drawing:
+                    if (_stateTimer >= DrawDuration)
+                    {
+                        Mode        = SwordMode.Holding;
+                        _stateTimer = 0f;
+                        _comboStep  = 0;
+                        if (_pendingAttack)
+                        {
+                            _pendingAttack = false;
+                            Mode        = SwordMode.Attacking;
+                            _stateTimer = 0f;
+                        }
+                    }
+                    break;
+
+                case SwordMode.Sheathing:
+                    if (_stateTimer >= SheathDuration)
+                    {
+                        Mode        = SwordMode.Sheathed;
+                        _stateTimer = 0f;
+                    }
+                    break;
+
+                case SwordMode.Holding:
+                    if (_stateTimer >= HoldAutoSheathe)
+                        RequestSheathe();
+                    break;
+
+                case SwordMode.Attacking:
+                    float hitPoint = AttackDuration * 0.62f;
+                    if (!_inHitStop && _stateTimer >= hitPoint)
+                    {
+                        _inHitStop   = true;
+                        HitStopTimer = HitStopDuration;
+                        return;
+                    }
+                    if (_stateTimer >= AttackDuration)
+                    {
+                        _inHitStop = false;
+                        _comboStep++;
+                        if (_pendingAttack && _comboStep < ComboLength)
+                        {
+                            _pendingAttack = false;
+                            _stateTimer    = 0f;
+                            _inHitStop     = false;
+                        }
+                        else
+                        {
+                            Mode        = SwordMode.Holding;
+                            _stateTimer = 0f;
+                            _comboStep  = 0;
+                        }
+                    }
+                    break;
+            }
         }
 
-        private void BuildLeg(float localX, float botY, float swing,
-                               Matrix bodyRot, Vector3 feetWorld, float bob)
+        // ─────────────────────────────────────────────────────────────
+        //  Brazos + espada — despacha según estado
+        // ─────────────────────────────────────────────────────────────
+        private void BuildArmsAndSword(float bodyTop, float walkSwing,
+                                       Matrix bodyRot, Vector3 feet, float bob,
+                                       float time)
         {
-            const int W = 3, H = 6, D = 3;
-            float hw = W * 0.5f * S, hd = D * 0.5f * S;
-            float y1 = botY + H * S;
-            var pivot  = new Vector3(localX, y1, 0);
-            var swingM = Matrix.CreateRotationX(swing * 0.35f);
-            AddBox(localX - hw, botY, -hd, localX + hw, y1, hd,
-                   pivot, swingM, bodyRot, feetWorld, bob, CPants, CPantsDark);
+            float t         = MathHelper.Clamp(_stateTimer, 0f, 10f);
+            float shoulderY = bodyTop - 1.2f * S;
+
+            switch (Mode)
+            {
+                case SwordMode.Sheathed:
+                    BuildVoxelArm(-5.0f * S, shoulderY,  walkSwing, bodyRot, feet, bob);
+                    BuildVoxelArm( 5.0f * S, shoulderY, -walkSwing, bodyRot, feet, bob);
+                    BuildSheathedSword(bodyRot, feet, bob);
+                    break;
+
+                case SwordMode.Drawing:
+                {
+                    float p        = EaseOutElastic(t / DrawDuration, 0.4f);
+                    float armPitch = MathHelper.Lerp(-walkSwing, MathHelper.Pi * 0.55f, p);
+                    BuildVoxelArm(-5.0f * S, shoulderY,  walkSwing, bodyRot, feet, bob);
+                    BuildVoxelArm( 5.0f * S, shoulderY,  armPitch,  bodyRot, feet, bob);
+                    BuildDrawingSword(MathHelper.Clamp(p, 0f, 1f), bodyRot, feet, bob);
+                    break;
+                }
+
+                case SwordMode.Holding:
+                {
+                    float idleBob = (float)Math.Sin(time * 1.8f) * 0.008f;
+                    float armIdle = -0.35f + idleBob;
+                    BuildVoxelArm(-5.0f * S, shoulderY,  walkSwing, bodyRot, feet, bob);
+                    BuildVoxelArm( 5.0f * S, shoulderY,  armIdle,   bodyRot, feet, bob);
+                    BuildSwordAtArmEnd(5.0f * S, shoulderY, armIdle,
+                                       MathHelper.ToRadians(-15f), 0f,
+                                       bodyRot, feet, bob);
+                    break;
+                }
+
+                case SwordMode.Sheathing:
+                {
+                    float p        = EaseOut(t / SheathDuration);
+                    float armPitch = MathHelper.Lerp(MathHelper.Pi * 0.55f, -walkSwing, p);
+                    BuildVoxelArm(-5.0f * S, shoulderY,  walkSwing, bodyRot, feet, bob);
+                    BuildVoxelArm( 5.0f * S, shoulderY,  armPitch,  bodyRot, feet, bob);
+                    BuildDrawingSword(1f - p, bodyRot, feet, bob);
+                    break;
+                }
+
+                case SwordMode.Attacking:
+                {
+                    float rawP = MathHelper.Clamp(t / AttackDuration, 0f, 1f);
+                    BuildAttackFrame(_comboStep, rawP, bodyTop, walkSwing, bodyRot, feet, bob);
+                    break;
+                }
+            }
         }
 
-        private void BuildArm(float localX, float topY, float swing,
-                               Matrix bodyRot, Vector3 feetWorld, float bob)
+        // ─────────────────────────────────────────────────────────────
+        //  Partes del cuerpo
+        // ─────────────────────────────────────────────────────────────
+
+        private void BuildVoxelFoot(float cx, float botY, float swing,
+                                     Matrix bodyRot, Vector3 feet, float bob)
         {
-            const int W = 3, H = 8, D = 3;
-            float hw = W * 0.5f * S, hd = D * 0.5f * S;
-            float y0 = topY - H * S, y1 = topY;
-            var pivot  = new Vector3(localX, y1, 0);
-            var swingM = Matrix.CreateRotationX(swing * 0.45f);
-            // Sleeve
-            AddBox(localX - hw, y0 + H * 0.45f * S, -hd, localX + hw, y1, hd,
-                   pivot, swingM, bodyRot, feetWorld, bob, CTunic, CTunicDark, CTunicSide);
-            // Forearm / hand
-            AddBox(localX - hw, y0, -hd, localX + hw, y0 + H * 0.45f * S, hd,
-                   pivot, swingM, bodyRot, feetWorld, bob, CSkin, CSkinDark);
+            float v  = S * 0.95f;
+            float rX = 2.3f, rY = 1.4f, rZ = 3.0f;
+            float centreY = botY + rY * v;
+            float centreZ = -0.6f * v;
+            var   pivot   = new Vector3(cx, botY + rY * 2f * v, 0f);
+            var   swM     = Matrix.CreateRotationX(swing * 0.85f);
+
+            int iX = (int)Math.Ceiling(rX);
+            int iY = (int)Math.Ceiling(rY);
+            int iZ = (int)Math.Ceiling(rZ);
+
+            for (int xi = -iX; xi <= iX; xi++)
+            for (int yi = -iY; yi <= iY; yi++)
+            for (int zi = -iZ; zi <= iZ; zi++)
+            {
+                float nx = xi/rX, ny = yi/rY, nz = zi/rZ;
+                if (nx*nx + ny*ny + nz*nz > 1.0f) continue;
+
+                float wx0 = cx+xi*v, wy0 = centreY+yi*v, wz0 = centreZ+zi*v;
+                float yFade = (yi+iY)/(float)(iY*2);
+                Color light = Lerp(CBootDark, CBoot,    yFade);
+                Color dark  = Lerp(CBootSole, CBootMid, yFade * 0.6f);
+                float zExt  = (zi == -iZ) ? v * 0.2f : 0f;
+
+                AddBox(wx0, wy0, wz0-zExt, wx0+v, wy0+v, wz0+v,
+                       pivot, swM, bodyRot, feet, bob, light, dark);
+            }
         }
 
-        // Head uses its own headRot matrix (body yaw + head offset).
-        private void BuildHead(float botY, Matrix headRot, Vector3 feetWorld, float bob)
+        private void BuildVoxelBody(float botY, float topY,
+                                     Matrix bodyRot, Vector3 feet, float bob)
         {
-            const int Sz = 8;
-            float hw  = Sz * 0.5f * S;
-            float topY = botY + Sz * S;
+            float v  = S;
+            float rX = 3.5f;
+            float rY = (topY - botY) / (2f * v);
+            float rZ = 2.3f;
+            float cx = 0f, cy = botY + rY * v, cz = 0f;
 
-            // Base skin
-            AddBox(-hw, botY, -hw, hw, topY, hw,
-                   Vector3.Zero, Matrix.Identity, headRot, feetWorld, bob,
-                   CSkin, CSkinShade);
+            int iX = (int)Math.Ceiling(rX);
+            int iY = (int)Math.Ceiling(rY);
+            int iZ = (int)Math.Ceiling(rZ);
 
-            // Hair top cap
-            AddBox(-hw - 0.2f * S, topY - 2.5f * S, -hw - 0.2f * S,
-                    hw + 0.2f * S, topY + 0.4f * S,  hw + 0.2f * S,
-                   Vector3.Zero, Matrix.Identity, headRot, feetWorld, bob,
-                   CHair, CHairDark);
-            // Side panels
-            AddBox(-hw - 0.4f * S, botY + 3f * S, -hw + 0.2f * S,
-                   -hw + 0.4f * S, topY + 0.4f * S,  hw - 0.2f * S,
-                   Vector3.Zero, Matrix.Identity, headRot, feetWorld, bob,
-                   CHair, CHairDark);
-            AddBox( hw - 0.4f * S, botY + 3f * S, -hw + 0.2f * S,
-                    hw + 0.4f * S, topY + 0.4f * S,  hw - 0.2f * S,
-                   Vector3.Zero, Matrix.Identity, headRot, feetWorld, bob,
-                   CHair, CHairDark);
-            // Back hair
-            AddBox(-hw - 0.2f * S, botY + 1.5f * S, hw - 0.5f * S,
-                    hw + 0.2f * S, topY + 0.4f * S,  hw + 0.6f * S,
-                   Vector3.Zero, Matrix.Identity, headRot, feetWorld, bob,
-                   CHair, CHairDark);
+            int collarYMin = (int)(iY * 0.58f);
+            int collarXMax = 2;
+            int buckleYMin = (int)(iY * -0.08f);
+            int buckleYMax = (int)(iY *  0.25f);
 
-            // Eyes (front = local -Z)
-            float eyeZ   = -hw - 0.02f;
-            float eyeBot = botY + 3.8f * S;
-            float eyeTop = botY + 5.5f * S;
-            float eyeW   = 1.8f * S;
-            float eyeD   = 0.4f  * S;
+            for (int xi = -iX; xi <= iX; xi++)
+            for (int yi = -iY; yi <= iY; yi++)
+            for (int zi = -iZ; zi <= iZ; zi++)
+            {
+                float nx = xi/rX, ny = yi/rY, nz = zi/rZ;
+                if (nx*nx + ny*ny + nz*nz > 1.0f) continue;
 
-            AddBox(-hw + 1.0f * S, eyeBot, eyeZ, -hw + 1.0f * S + eyeW, eyeTop, eyeZ + eyeD,
-                   Vector3.Zero, Matrix.Identity, headRot, feetWorld, bob, CEyeWhite, CEyeWhite);
-            AddBox( hw - 1.0f * S - eyeW, eyeBot, eyeZ,  hw - 1.0f * S, eyeTop, eyeZ + eyeD,
-                   Vector3.Zero, Matrix.Identity, headRot, feetWorld, bob, CEyeWhite, CEyeWhite);
+                float wx0 = cx+xi*v, wy0 = cy+yi*v, wz0 = cz+zi*v;
+                float yFade = (yi+iY)/(float)(iY*2);
+                float zFade = 1f-(zi+iZ)/(float)(iZ*2);
+                float blend = yFade*0.6f + zFade*0.4f;
 
-            float irisW = 1.2f * S, irisH = 1.2f * S;
-            AddBox(-hw + 1.3f * S, eyeBot + 0.4f * S, eyeZ - 0.02f,
-                   -hw + 1.3f * S + irisW, eyeBot + 0.4f * S + irisH, eyeZ,
-                   Vector3.Zero, Matrix.Identity, headRot, feetWorld, bob, CEyeIris, CEyeIris);
-            AddBox( hw - 1.3f * S - irisW, eyeBot + 0.4f * S, eyeZ - 0.02f,
-                    hw - 1.3f * S,          eyeBot + 0.4f * S + irisH, eyeZ,
-                   Vector3.Zero, Matrix.Identity, headRot, feetWorld, bob, CEyeIris, CEyeIris);
+                Color baseL = Lerp(CTunicDark, CTunic,    blend);
+                Color baseD = Lerp(CTunicDark, CTunicMid, blend * 0.55f);
 
-            float pupW = 0.6f * S;
-            AddBox(-hw + 1.6f * S, eyeBot + 0.7f * S, eyeZ - 0.04f,
-                   -hw + 1.6f * S + pupW, eyeBot + 0.7f * S + pupW, eyeZ - 0.02f,
-                   Vector3.Zero, Matrix.Identity, headRot, feetWorld, bob, CEyePupil, CEyePupil);
-            AddBox( hw - 1.6f * S - pupW, eyeBot + 0.7f * S, eyeZ - 0.04f,
-                    hw - 1.6f * S,         eyeBot + 0.7f * S + pupW, eyeZ - 0.02f,
-                   Vector3.Zero, Matrix.Identity, headRot, feetWorld, bob, CEyePupil, CEyePupil);
+                bool isFront  = (zi == -iZ);
+                bool isCollar = isFront && yi >= collarYMin && Math.Abs(xi) <= collarXMax;
+                bool isBuckle = isFront && yi >= buckleYMin && yi <= buckleYMax && Math.Abs(xi) <= 1;
 
-            // Eyebrows
-            float browY = eyeTop + 0.2f * S;
-            AddBox(-hw + 0.8f * S, browY, eyeZ - 0.01f, -hw + 2.4f * S, browY + 0.5f * S, eyeZ,
-                   Vector3.Zero, Matrix.Identity, headRot, feetWorld, bob, CHair, CHairDark);
-            AddBox( hw - 2.4f * S, browY, eyeZ - 0.01f,  hw - 0.8f * S, browY + 0.5f * S, eyeZ,
-                   Vector3.Zero, Matrix.Identity, headRot, feetWorld, bob, CHair, CHairDark);
+                Color light = isCollar ? CCollar   : isBuckle ? CBuckle   : baseL;
+                Color dark  = isCollar ? CCollarDk : isBuckle ? CBuckleDk : baseD;
 
-            // Nose
-            float noseY = botY + 2.5f * S;
-            AddBox(-0.5f * S, noseY, eyeZ - 0.3f * S, 0.5f * S, noseY + 1.0f * S, eyeZ,
-                   Vector3.Zero, Matrix.Identity, headRot, feetWorld, bob, CSkinShade, CSkinDark);
-
-            // Mouth
-            float mouthY = botY + 1.8f * S;
-            AddBox(-1.2f * S, mouthY, eyeZ - 0.02f, 1.2f * S, mouthY + 0.5f * S, eyeZ,
-                   Vector3.Zero, Matrix.Identity, headRot, feetWorld, bob, CSkinDark, CSkinDark);
+                AddBox(wx0, wy0, wz0, wx0+v, wy0+v, wz0+v,
+                       Vector3.Zero, Matrix.Identity, bodyRot, feet, bob, light, dark);
+            }
         }
 
-        // ──────────────────────────────────────────────────────────────
-        //  Core box emitter
-        // ──────────────────────────────────────────────────────────────
+        private void BuildVoxelArm(float cx, float shoulderY, float swing,
+                                    Matrix bodyRot, Vector3 feet, float bob)
+        {
+            float v   = S * 0.9f;
+            float r   = 2.2f * S;
+            var pivot = new Vector3(cx, shoulderY, 0f);
+            var swM   = Matrix.CreateRotationX(swing * 1.1f);
+
+            for (int iy = -2; iy <= 2; iy++)
+            for (int ix = -2; ix <= 2; ix++)
+            for (int iz = -2; iz <= 2; iz++)
+            {
+                float px = ix*v, py = iy*v, pz = iz*v;
+                if (px*px + py*py + pz*pz > r*r*1.05f) continue;
+
+                float shade = (iy+2)/4f;
+                Color light = Lerp(CSkinDark, CSkin,      shade);
+                Color dark  = Lerp(CSkinDark, CSkinShade, shade * 0.6f);
+
+                AddBox(cx+px, shoulderY-r+py+v*0.5f, -v*0.5f+pz,
+                       cx+px+v, shoulderY-r+py+v*0.5f+v, v*0.5f+pz,
+                       pivot, swM, bodyRot, feet, bob, light, dark);
+            }
+        }
+
+        private void BuildVoxelHead(float botY, Matrix headRot, Vector3 feet, float bob)
+        {
+            float v  = S;
+            float cx = 0f, cz = 0f;
+            float rX = 5.0f, rY = 5.5f, rZ = 4.2f;
+            float cy = botY + rY * v;
+
+            int xH = (int)Math.Ceiling(rX);
+            int yR = (int)Math.Ceiling(rY * 2f);
+            int zH = (int)Math.Ceiling(rZ);
+
+            // ── Cara ─────────────────────────────────────────────────
+            for (int row = 0; row <= yR; row++)
+            {
+                float wy0 = botY + row * v;
+                float ny  = (wy0 + v*0.5f - cy) / (rY * v);
+                for (int xi = -xH; xi <= xH; xi++)
+                for (int zi = -zH; zi <= zH; zi++)
+                {
+                    float nx = xi/rX, nz = zi/rZ;
+                    if (nx*nx + ny*ny + nz*nz > 1.0f) continue;
+                    float yFade = (float)row / yR;
+                    float xFade = (float)Math.Abs(xi) / (rX + 0.5f);
+                    Color light = Lerp(CSkinShade, Lighten(CSkin, 20), yFade * (1f - xFade*0.35f));
+                    Color dark  = Lerp(CSkinDark, CSkinShade, yFade * 0.5f);
+                    AddBox(cx+xi*v, wy0, cz+zi*v, cx+xi*v+v, wy0+v, cz+zi*v+v,
+                           Vector3.Zero, Matrix.Identity, headRot, feet, bob, light, dark);
+                }
+            }
+
+            // ── Pelo ─────────────────────────────────────────────────
+            float hrX = rX+1.1f, hrY = rY+0.9f, hrZ = rZ+0.7f;
+            int   hxH = (int)Math.Ceiling(hrX);
+            int   hyR = (int)Math.Ceiling(hrY * 2f);
+            int   hzH = (int)Math.Ceiling(hrZ);
+
+            for (int row = 0; row <= hyR; row++)
+            {
+                float wy0 = botY + row * v;
+                float ny  = (wy0 + v*0.5f - cy) / (hrY * v);
+                bool crownRow = row >= (int)(yR * 0.35f);
+                bool sideRow  = row >= (int)(yR * 0.20f);
+                for (int xi = -hxH; xi <= hxH; xi++)
+                for (int zi = -hzH; zi <= hzH; zi++)
+                {
+                    float nx = xi/hrX, nz = zi/hrZ;
+                    if (nx*nx + ny*ny + nz*nz > 1.0f) continue;
+                    float nxS = xi/rX, nyS = (wy0+v*0.5f-cy)/(rY*v), nzS = zi/rZ;
+                    if (nxS*nxS + nyS*nyS + nzS*nzS < 0.91f) continue;
+                    bool isSide = Math.Abs(xi) >= (int)(hrX * 0.45f);
+                    if (!crownRow && !isSide) continue;
+                    if (!sideRow) continue;
+                    float yExtra = (row >= yR) ? v * 0.5f : 0f;
+                    float pad    = v * 0.06f;
+                    AddBox(cx+xi*v-pad, wy0, cz+zi*v-pad,
+                           cx+xi*v+v+pad, wy0+v+yExtra, cz+zi*v+v+pad,
+                           Vector3.Zero, Matrix.Identity, headRot, feet, bob,
+                           CHair, CHairDark, CHairMid);
+                }
+            }
+
+            // ── Flequillo ────────────────────────────────────────────
+            {
+                float fringeBaseY = botY + (int)(yR * 0.40f) * v;
+                float frontZ      = cz - rZ * v;
+                int   fW          = (int)(rX * 0.75f);
+                for (int xi = -fW; xi <= fW; xi++)
+                {
+                    float t2      = (float)Math.Abs(xi) / fW;
+                    float fringeH = v * (1.7f + (1f - t2*t2) * 1.0f);
+                    float wx0     = cx + xi * v;
+                    AddBox(wx0, fringeBaseY-v*0.4f, frontZ-v*1.2f,
+                           wx0+v, fringeBaseY+fringeH, frontZ,
+                           Vector3.Zero, Matrix.Identity, headRot, feet, bob,
+                           CHair, CHairDark, CHairMid);
+                    AddBox(wx0, fringeBaseY, frontZ,
+                           wx0+v, fringeBaseY+fringeH*0.7f, frontZ+v*0.7f,
+                           Vector3.Zero, Matrix.Identity, headRot, feet, bob,
+                           CHairMid, CHairDark);
+                }
+            }
+
+            // ── Ojos ─────────────────────────────────────────────────
+            float faceZ  = cz - rZ * v;
+            float eyeBot = botY + (int)(yR * 0.35f) * v;
+
+            int[][] eyeRanges = { new[] { -4, -2 }, new[] { 1, 3 } };
+            foreach (int[] range in eyeRanges)
+            {
+                for (int xi = range[0]; xi <= range[1]; xi++)
+                for (int yi = 0; yi < 4; yi++)
+                {
+                    float wx0      = cx + xi * v;
+                    float wy0      = eyeBot + yi * v;
+                    bool  isIris   = (xi == range[0] + 1);
+                    bool  isSclera = !isIris && (yi == 0 || yi == 3);
+                    Color faceLight = isIris    ? CEyeBlue
+                                    : isSclera  ? CEyeWhite
+                                                : CEyeBlack;
+                    Color faceDark  = isIris    ? Lerp(CEyeBlue, CEyeBlack, 0.5f)
+                                    : isSclera  ? Lerp(CEyeWhite, CEyeBlack, 0.35f)
+                                                : CEyeBlack;
+                    AddBox(wx0, wy0, faceZ-v*0.6f, wx0+v, wy0+v, faceZ,
+                           Vector3.Zero, Matrix.Identity, headRot, feet, bob,
+                           faceLight, faceDark);
+                }
+            }
+
+            // ── Boca ─────────────────────────────────────────────────
+            float mouthY = eyeBot - v * 1.4f;
+            for (int xi = -1; xi <= 1; xi++)
+                AddBox(cx+xi*v, mouthY, faceZ-v*0.4f, cx+xi*v+v, mouthY+v*0.6f, faceZ,
+                       Vector3.Zero, Matrix.Identity, headRot, feet, bob,
+                       CEyeBlack, CEyeBlack);
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        //  Primitivas de geometría
+        // ─────────────────────────────────────────────────────────────
+
         private void AddBox(float x0, float y0, float z0,
                             float x1, float y1, float z1,
                             Vector3 pivotLocal, Matrix swingMat,
                             Matrix rot, Vector3 worldOrigin, float bobY,
-                            Color colLight, Color colDark,
-                            Color? colSide = null)
+                            Color colLight, Color colDark, Color? colSide = null)
         {
-            Color sideCol = colSide ?? colLight;
+            Color side = colSide ?? Lerp(colLight, colDark, 0.18f);
 
             Span<Vector3> c = stackalloc Vector3[8];
-            c[0] = new Vector3(x0, y0, z0);
-            c[1] = new Vector3(x1, y0, z0);
-            c[2] = new Vector3(x1, y1, z0);
-            c[3] = new Vector3(x0, y1, z0);
-            c[4] = new Vector3(x0, y0, z1);
-            c[5] = new Vector3(x1, y0, z1);
-            c[6] = new Vector3(x1, y1, z1);
-            c[7] = new Vector3(x0, y1, z1);
+            c[0] = new Vector3(x0, y0, z0); c[1] = new Vector3(x1, y0, z0);
+            c[2] = new Vector3(x1, y1, z0); c[3] = new Vector3(x0, y1, z0);
+            c[4] = new Vector3(x0, y0, z1); c[5] = new Vector3(x1, y0, z1);
+            c[6] = new Vector3(x1, y1, z1); c[7] = new Vector3(x0, y1, z1);
 
             for (int i = 0; i < 8; i++)
                 c[i] = Vector3.Transform(c[i] - pivotLocal, swingMat) + pivotLocal;
 
-            var bobVec = new Vector3(0, bobY, 0);
+            var bv = new Vector3(0f, bobY, 0f);
             for (int i = 0; i < 8; i++)
-                c[i] = Vector3.Transform(c[i], rot) + worldOrigin + bobVec;
+                c[i] = Vector3.Transform(c[i], rot) + worldOrigin + bv;
 
-            Color top    = Lighten(colLight, 30);
-            Color front  = sideCol;
-            Color back   = Lerp(sideCol, colDark, 0.35f);
-            Color left   = Lerp(sideCol, colDark, 0.20f);
-            Color right2 = Lerp(sideCol, colDark, 0.10f);
-            Color bot    = colDark;
-
-            EmitQuad(c[0], c[1], c[2], c[3], front);
-            EmitQuad(c[5], c[4], c[7], c[6], back);
-            EmitQuad(c[4], c[0], c[3], c[7], left);
-            EmitQuad(c[1], c[5], c[6], c[2], right2);
-            EmitQuad(c[3], c[2], c[6], c[7], top);
-            EmitQuad(c[4], c[5], c[1], c[0], bot);
+            EmitQuad(c[0], c[1], c[2], c[3], colLight);
+            EmitQuad(c[5], c[4], c[7], c[6], Lerp(colDark, Color.Black, 0.30f));
+            EmitQuad(c[4], c[0], c[3], c[7], Lerp(side, colDark, 0.25f));
+            EmitQuad(c[1], c[5], c[6], c[2], Lerp(side, colLight, 0.10f));
+            EmitQuad(c[3], c[2], c[6], c[7], Lighten(colLight, 35));
+            EmitQuad(c[4], c[5], c[1], c[0], Lerp(colDark, Color.Black, 0.18f));
         }
 
         private void EmitQuad(Vector3 a, Vector3 b, Vector3 c, Vector3 d, Color col)
@@ -328,12 +637,38 @@ namespace game
             _verts[_vc++] = new VertexPositionColor(b, col);
             _verts[_vc++] = new VertexPositionColor(c, col);
             _verts[_vc++] = new VertexPositionColor(d, col);
-            _idx[_ic++] = b0;         _idx[_ic++] = (short)(b0+1); _idx[_ic++] = (short)(b0+2);
-            _idx[_ic++] = b0;         _idx[_ic++] = (short)(b0+2); _idx[_ic++] = (short)(b0+3);
+            _idx[_ic++] = b0;             _idx[_ic++] = (short)(b0+1); _idx[_ic++] = (short)(b0+2);
+            _idx[_ic++] = b0;             _idx[_ic++] = (short)(b0+2); _idx[_ic++] = (short)(b0+3);
         }
 
+        // ─────────────────────────────────────────────────────────────
+        //  Easing
+        // ─────────────────────────────────────────────────────────────
+        private static float EaseOut(float t) => 1f - (1f - t) * (1f - t);
+
+        private static float EaseOutImpact(float t)
+        {
+            if (t < 0.75f)
+                return EaseOutCubic(t / 0.75f) * 0.92f;
+            float u = (t - 0.75f) / 0.25f;
+            return 0.92f + (float)Math.Sin(u * Math.PI) * 0.12f;
+        }
+
+        private static float EaseOutCubic(float t) => 1f - (1f - t) * (1f - t) * (1f - t);
+
+        private static float EaseOutElastic(float t, float amplitude)
+        {
+            if (t <= 0f) return 0f;
+            if (t >= 1f) return 1f;
+            float decay = (float)Math.Exp(-6f * t);
+            float osc   = (float)Math.Sin(t * Math.PI * 3.5f);
+            return 1f - decay * osc * amplitude;
+        }
+
+        // ── Utilidades de color ───────────────────────────────────────
         private static Color Lighten(Color c, int a) =>
             new Color(Math.Min(255, c.R + a), Math.Min(255, c.G + a), Math.Min(255, c.B + a));
+
         private static Color Lerp(Color a, Color b, float t) =>
             new Color((int)(a.R + (b.R - a.R) * t),
                       (int)(a.G + (b.G - a.G) * t),

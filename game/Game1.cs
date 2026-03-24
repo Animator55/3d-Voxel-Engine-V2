@@ -21,7 +21,7 @@ namespace game
 
         private Camera _camera;
         private ChunkManager _chunkManager;
-        private int _loadDistance = 10;
+        private int _loadDistance = 4;
 
         // ── Third-person mode ─────────────────────────────────────────
         private bool _thirdPerson = false;
@@ -45,6 +45,9 @@ namespace game
         private bool _fancyWater = true;
         private bool _lastF3 = false;
         private bool _lastT = false;
+
+        private bool _lastLMB = false;
+        private bool _lastRMB = false;
 
         private RasterizerState _solidState;
         private RasterizerState _wireframeState;
@@ -107,14 +110,12 @@ namespace game
                                              chunkSize: 32,
                                              loadDistance: _loadDistance);
 
-            // ── Third-person ──────────────────────────────────────────
             _tpCamera = new ThirdPersonCamera(GraphicsDevice, aspect,
                 fovDegrees: 90f,
                 nearPlane: 0.1f,
                 farPlane: 100000f,
                 chunkManager: _chunkManager);
 
-            // ← THIS was missing – player was never constructed
             _player = new PlayerController(
                 startPosition: new Vector3(0, 62, 0),
                 chunkManager: _chunkManager);
@@ -261,7 +262,8 @@ namespace game
             }
             _lastEscape = escNow;
 
-            Vector3 worldPos = _thirdPerson ? _player.Position : _camera.Position;
+            Vector3 worldPos = _thirdPerson ? _player.VisualPosition
+                                           : _camera.Position;
             _chunkManager.Update(worldPos, null);
 
             if (_pauseMenu.IsOpen)
@@ -293,15 +295,32 @@ namespace game
                 }
                 else
                 {
-                    _camera.Position = _player.Position + new Vector3(0, PlayerController.Height * 0.9f, 0);
+                    _camera.Position = _player.VisualPosition + new Vector3(0, PlayerController.Height * 0.9f, 0);
                 }
             }
             _lastF5 = f5;
 
+            var mouse = Mouse.GetState();
+
+            bool lmbNow = (mouse.LeftButton == ButtonState.Pressed);
+            bool rmbNow = (mouse.RightButton == ButtonState.Pressed);
+
+            if (_thirdPerson)
+            {
+                if (lmbNow && !_lastLMB)
+                    _playerRenderer.RequestAttack();
+
+                if (rmbNow && !_lastRMB)
+                    _playerRenderer.RequestSheathe();
+            }
+
+            _lastLMB = lmbNow;
+            _lastRMB = rmbNow;
+
             // ── Update camera / player ────────────────────────────────
             if (_thirdPerson)
             {
-                _tpCamera.Update(gameTime, _player.Position);
+                _tpCamera.Update(gameTime, _player.VisualPosition);
                 _player.Update(gameTime, _tpCamera.PlayerFacingYaw);
             }
             else
@@ -443,14 +462,15 @@ namespace game
             if (_thirdPerson)
             {
                 _playerRenderer.Draw(
-                    feetPos: _player.Position,
-                    bodyYaw: _player.BodyYaw,
-                    headYawOffset: _player.HeadYawOffset,
-                    view: activeView,
-                    proj: activeProj,
-                    isGrounded: _player.IsGrounded,
-                    velocity: _player.Velocity,
-                    gameTime: gameTime);
+                    feetPos:        _player.VisualPosition,
+                    bodyYaw:        _player.BodyYaw,
+                    headYawOffset:  _player.HeadYawOffset,
+                    view:           activeView,
+                    proj:           activeProj,
+                    isGrounded:     _player.IsGrounded,
+                    velocity:       _player.Velocity,
+                    gameTime:       gameTime,
+                    isMoving:       _player.IsMoving);   // ← NUEVO
             }
 
             // ─────────────────────────────────────────────────────────
@@ -516,6 +536,9 @@ namespace game
                 L.Add(("", "[ Player ]", CHeader));
                 L.Add(("grounded", _player.IsGrounded ? "yes" : "no",
                        _player.IsGrounded ? CGood : CWarn));
+                L.Add(("moving",   _player.IsMoving   ? "yes" : "no",
+                       _player.IsMoving   ? CGood : CLabel));
+                L.Add(("sword", _playerRenderer.Mode.ToString(), ModeColor(_playerRenderer.Mode)));
                 L.Add(("vel y", $"{_player.Velocity.Y:F2}", CValue));
             }
 
@@ -609,6 +632,16 @@ namespace game
 
         private void DrawPanel(int x, int y, int w, int h)
             => _spriteBatch.Draw(_pixel, new Rectangle(x, y, w, h), Color.Black * 0.45f);
+
+        private static Color ModeColor(SwordMode m) => m switch
+        {
+            SwordMode.Sheathed  => new Color(150, 150, 155),
+            SwordMode.Drawing   => new Color(255, 200,  50),
+            SwordMode.Holding   => new Color(100, 220, 255),
+            SwordMode.Attacking => new Color(255,  80,  80),
+            SwordMode.Sheathing => new Color(180, 150, 255),
+            _                   => Color.White,
+        };
 
         private void DrawCrosshair()
         {
