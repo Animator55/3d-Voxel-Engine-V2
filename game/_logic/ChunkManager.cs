@@ -545,7 +545,9 @@ namespace game
                                 new Vector3Int(cp.X + dx, cp.Y + dy, cp.Z + dz),
                                 out neighbors[dx + 1, dy + 1, dz + 1]);
             }
-            var mesher = new GreedyMesher(chunk, neighbors, _chunkSize, fancyWater: _fancyWater);
+            var mesher = new GreedyMesher(chunk, neighbors, _chunkSize,
+                               fancyWater: _fancyWater,
+                               worldGen: _worldGenerator);
             var (vertices, indices, waterVerts, waterIdx, riverVerts, riverIdx, debugInfo)
                 = mesher.GenerateMesh();
 

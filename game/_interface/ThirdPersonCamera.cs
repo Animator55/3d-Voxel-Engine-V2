@@ -148,7 +148,7 @@ namespace game
                 {
                     Vector3 corner = p + new Vector3(ox * eyeRad, 0, oz * eyeRad);
                     byte b = _chunkManager.GetBlockAtWorldPosition(corner);
-                    if (b != BlockType.Air && b != BlockType.Water)
+                    if (b != BlockType.Air && b != BlockType.AirCave && b != BlockType.Water)
                         return Math.Max(MinDistance * 0.5f, d - step);
                 }
                 d += step;

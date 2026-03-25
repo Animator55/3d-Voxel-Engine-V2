@@ -14,14 +14,20 @@ namespace game
         public const byte Snow      = 7;
         public const byte Leaves    = 8;
         public const byte Glowstone = 9;
+        public const byte AirCave   = 10;   // aire sin luz solar (interior de cuevas)
 
         public static bool IsSolid(byte blockType)
-            => blockType != Air && blockType != Water;
+            => blockType != Air && blockType != AirCave && blockType != Water;
 
         public static bool IsTransparent(byte blockType)
-            => blockType == Air || blockType == Water;
+            => blockType == Air || blockType == AirCave || blockType == Water;
 
-        /// <summary>Returns true for blocks that need the transparent/water render pass.</summary>
+        public static bool IsAir(byte blockType)
+            => blockType == Air || blockType == AirCave;
+
+        /// <summary>True solo para el aire natural (con luz solar).</summary>
+        public static bool IsSkyAir(byte blockType) => blockType == Air;
+
         public static bool IsWater(byte blockType) => blockType == Water;
 
         public static Color GetBlockColor(byte blockType)
@@ -34,7 +40,6 @@ namespace game
                 Leaves    => new Color( 24, 109,  44),
                 Snow      => new Color(255, 255, 255),
                 Sand      => new Color(238, 214, 175),
-                // Water base color – alpha 200 for semi-transparency hint in vertex color
                 Water     => new Color( 40,  90, 210, 200),
                 Wood      => new Color(101,  67,  33),
                 Glowstone => new Color(255, 220, 100),

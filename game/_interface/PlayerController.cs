@@ -235,7 +235,7 @@ namespace game
             {
                 byte b = _chunkManager.GetBlockAtWorldPosition(
                     new Vector3(x + 0.5f, y + 0.5f, z + 0.5f));
-                if (b != BlockType.Air && b != BlockType.Water)
+                if (b != BlockType.Air && b != BlockType.AirCave && b != BlockType.Water)
                     return true;
             }
             return false;

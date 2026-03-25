@@ -165,6 +165,7 @@ namespace game
                         {
                             int by = wy - worldY;
                             if (blocks[bx, by, bz] == BlockType.Air
+                                || blocks[bx, by, bz] == BlockType.AirCave
                                 || blocks[bx, by, bz] == BlockType.Stone
                                 || blocks[bx, by, bz] == BlockType.Dirt)
                                 blocks[bx, by, bz] = BlockType.Water;
@@ -352,21 +353,29 @@ namespace game
 
         private byte GetBlockAt(int wx, int wy, int wz, int terrainH, BiomeType biome, bool isRiver)
         {
+            // Por encima del terreno: aire natural o agua de océano
             if (wy > terrainH)
                 return wy <= SeaLevel ? BlockType.Water : BlockType.Air;
+
+            // Cave carving: dentro de la masa sólida, si el ruido excede el
+            // umbral, el generador excava. El aire resultante NO tiene cielo
+            // encima → AirCave.
             if (wy > 4 && wy < terrainH - 1)
             {
                 float cave = (OctaveNoise3D(wx, wy, wz, 40f, 2, 0.5f, _seed + 99) + 1f) * 0.5f;
-                if (cave > CaveThreshold) return BlockType.Air;
+                if (cave > CaveThreshold) return BlockType.AirCave;
             }
+
             if (wy == terrainH) return GetSurfaceBlock(biome, isRiver, terrainH);
             if (wy >= terrainH - 3)
             {
                 return biome switch
                 {
                     BiomeType.Desert => BlockType.Sand,
-                    BiomeType.Ocean => BlockType.Stone,
-                    _ => terrainH < SeaLevel ? BlockType.Sand : terrainH > SeaLevel ? BlockType.Dirt : BlockType.Water
+                    BiomeType.Ocean  => BlockType.Stone,
+                    _ => terrainH < SeaLevel ? BlockType.Sand
+                       : terrainH > SeaLevel ? BlockType.Dirt
+                       : BlockType.Water
                 };
             }
             return BlockType.Stone;
@@ -377,15 +386,15 @@ namespace game
             if (isRiver) return BlockType.Sand;
             return biome switch
             {
-                BiomeType.Ocean => h <= SeaLevel - 3 ? BlockType.Stone : BlockType.Sand,
-                BiomeType.Desert => BlockType.Sand,
+                BiomeType.Ocean    => h <= SeaLevel - 3 ? BlockType.Stone : BlockType.Sand,
+                BiomeType.Desert   => BlockType.Sand,
                 BiomeType.Mountains => h > SeaLevel + 45 ? BlockType.Snow
                                      : h > SeaLevel + 10 ? BlockType.Stone
                                      : BlockType.Grass,
-                BiomeType.Taiga => h > SeaLevel + 30 ? BlockType.Snow : BlockType.Grass,
-                BiomeType.Plains => h <= SeaLevel ? BlockType.Sand : BlockType.Grass,
-                BiomeType.Forest => h <= SeaLevel ? BlockType.Sand : BlockType.Grass,
-                _ => BlockType.Grass
+                BiomeType.Taiga    => h > SeaLevel + 30 ? BlockType.Snow : BlockType.Grass,
+                BiomeType.Plains   => h <= SeaLevel ? BlockType.Sand : BlockType.Grass,
+                BiomeType.Forest   => h <= SeaLevel ? BlockType.Sand : BlockType.Grass,
+                _                  => BlockType.Grass
             };
         }
 
@@ -514,7 +523,6 @@ namespace game
                         riverFlat[idx] = ir;
                     }
 
-                // sc = how many sub-surface layers to fill (original logic)
                 int sc = simplificationLevel switch { 0 => 20, 1 => 10, _ => 5 };
 
                 for (int bx = 0; bx < chunkSize; bx++)
@@ -539,6 +547,7 @@ namespace game
                                 blocks[bx, by, bz] = BlockType.Stone;
                             else if (wy <= SeaLevel && wy > h)
                                 blocks[bx, by, bz] = BlockType.Water;
+                            // Los LOD no excavan cuevas → no emiten AirCave
                         }
                     }
 
