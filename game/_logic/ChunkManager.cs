@@ -107,7 +107,7 @@ namespace game
             _lowPolyMeshDataQueue = new Queue<MeshDataLowPoly>(512);
             _veryLowPolyMeshDataQueue = new Queue<MeshDataVeryLowPoly>(256);
 
-            _worldGenerator = new WorldGenerator(seed: 42);
+            _worldGenerator = new WorldGenerator(seed: 412);
             _lastPlayerChunkPos = Vector3Int.Zero;
             _lastPlayerPosition = Vector3.Zero;
         }

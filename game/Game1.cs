@@ -35,6 +35,9 @@ namespace game
 
         private PauseMenu _pauseMenu;
         private bool _lastEscape = false;
+        private ParticleSystem _particleSystem;
+        private EntityManager _entityManager;
+
 
         private SpriteBatch _spriteBatch;
         private SpriteFont _debugFont;
@@ -123,6 +126,7 @@ namespace game
             _solidState = new RasterizerState { CullMode = CullMode.CullClockwiseFace, FillMode = FillMode.Solid };
             _wireframeState = new RasterizerState { CullMode = CullMode.CullClockwiseFace, FillMode = FillMode.WireFrame };
 
+            EntityDefinitions.RegisterAll();
             base.Initialize();
         }
 
@@ -186,6 +190,24 @@ namespace game
             _pauseMenu.OnSettingsChanged += ApplySettings;
 
             _playerRenderer = new PlayerRenderer(GraphicsDevice);
+
+            _particleSystem = new ParticleSystem(GraphicsDevice, maxParticles: 4096);
+
+            _entityManager = new EntityManager(GraphicsDevice, _particleSystem);
+
+            // Opcional: suscribir loot
+            _entityManager.OnLootDropped += (pos, drops) =>
+            {
+                foreach (var drop in drops)
+                    Debug.WriteLine($"Loot: itemId={drop.ItemId} x{drop.MinCount} at {pos}");
+            };
+
+            // Spawn de ejemplo
+            _entityManager.Spawn(EntityIds.Pig, new Vector3(5, 65, 5));
+            _entityManager.Spawn(EntityIds.Sheep, new Vector3(10, 65, 8));
+            _entityManager.Spawn(EntityIds.Fern, new Vector3(3, 64, 3));
+            _entityManager.Spawn(EntityIds.Mushroom, new Vector3(-4, 64, 6));
+            _entityManager.Spawn(EntityIds.Zombie, new Vector3(15, 65, 0));
         }
 
         private void ApplySettings(GameSettings s)
@@ -364,6 +386,21 @@ namespace game
                 _smoothFps = avgMs > 0 ? (float)(1000.0 / avgMs) : 0f;
             }
 
+            Vector3 updatePlayerPos = _thirdPerson ? _player.Position : _camera.Position;
+            _entityManager.Update(gameTime, updatePlayerPos, _chunkManager);
+
+            // Conectar ataque del player con el hit de entidades:
+            // Cuando el PlayerRenderer entra en HitStopTimer y estamos en 3rd person:
+            if (_thirdPerson && _playerRenderer.HitStopTimer > 0f && _lastLMB)
+            {
+                const float AttackReach = 2.5f;
+                const float AttackDamage = 4f;
+                _entityManager.TryHitNearest(
+                    _player.Position + new Vector3(0f, PlayerController.Height * 0.6f, 0f),
+                    AttackReach,
+                    AttackDamage);
+            }
+
             base.Update(gameTime);
         }
 
@@ -462,16 +499,18 @@ namespace game
             if (_thirdPerson)
             {
                 _playerRenderer.Draw(
-                    feetPos:        _player.VisualPosition,
-                    bodyYaw:        _player.BodyYaw,
-                    headYawOffset:  _player.HeadYawOffset,
-                    view:           activeView,
-                    proj:           activeProj,
-                    isGrounded:     _player.IsGrounded,
-                    velocity:       _player.Velocity,
-                    gameTime:       gameTime,
-                    isMoving:       _player.IsMoving);   // ← NUEVO
+                    feetPos: _player.VisualPosition,
+                    bodyYaw: _player.BodyYaw,
+                    headYawOffset: _player.HeadYawOffset,
+                    view: activeView,
+                    proj: activeProj,
+                    isGrounded: _player.IsGrounded,
+                    velocity: _player.Velocity,
+                    gameTime: gameTime,
+                    isMoving: _player.IsMoving);   // ← NUEVO
             }
+
+            _entityManager.Draw(gameTime, activeView, activeProj);
 
             // ─────────────────────────────────────────────────────────
             //  HUD
@@ -536,8 +575,8 @@ namespace game
                 L.Add(("", "[ Player ]", CHeader));
                 L.Add(("grounded", _player.IsGrounded ? "yes" : "no",
                        _player.IsGrounded ? CGood : CWarn));
-                L.Add(("moving",   _player.IsMoving   ? "yes" : "no",
-                       _player.IsMoving   ? CGood : CLabel));
+                L.Add(("moving", _player.IsMoving ? "yes" : "no",
+                       _player.IsMoving ? CGood : CLabel));
                 L.Add(("sword", _playerRenderer.Mode.ToString(), ModeColor(_playerRenderer.Mode)));
                 L.Add(("vel y", $"{_player.Velocity.Y:F2}", CValue));
             }
@@ -601,6 +640,12 @@ namespace game
             }
             else R.Add(("status", "not loaded", CWarn));
 
+
+            R.Add(("", "", CLabel));
+            R.Add(("", "[ Entities ]", CHeader));
+            R.Add(("alive", $"{_entityManager.EntityCount}", CValue));
+            R.Add(("particles", $"{_entityManager.ParticleCount}", CValue));
+
             int vw = GraphicsDevice.Viewport.Width;
             int leftH = L.Count * LineH + PadY * 2;
             int rightH = R.Count * LineH + PadY * 2;
@@ -635,12 +680,12 @@ namespace game
 
         private static Color ModeColor(SwordMode m) => m switch
         {
-            SwordMode.Sheathed  => new Color(150, 150, 155),
-            SwordMode.Drawing   => new Color(255, 200,  50),
-            SwordMode.Holding   => new Color(100, 220, 255),
-            SwordMode.Attacking => new Color(255,  80,  80),
+            SwordMode.Sheathed => new Color(150, 150, 155),
+            SwordMode.Drawing => new Color(255, 200, 50),
+            SwordMode.Holding => new Color(100, 220, 255),
+            SwordMode.Attacking => new Color(255, 80, 80),
             SwordMode.Sheathing => new Color(180, 150, 255),
-            _                   => Color.White,
+            _ => Color.White,
         };
 
         private void DrawCrosshair()
@@ -670,6 +715,8 @@ namespace game
                 _playerRenderer?.Dispose();
                 _spriteBatch?.Dispose();
                 _pixel?.Dispose();
+                _entityManager?.Dispose();
+                _particleSystem?.Dispose();
             }
             base.Dispose(disposing);
         }

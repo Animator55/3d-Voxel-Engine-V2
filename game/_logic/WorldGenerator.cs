@@ -25,7 +25,7 @@ namespace game
         private readonly object _heightCacheLock = new object();
         private const int HEIGHT_CACHE_CAPACITY = 4096;
 
-        public WorldGenerator(int seed = 12345)
+        public WorldGenerator(int seed = 12346)
         {
             _seed = seed;
             _blockCache = new LruCache<(int, int, int), byte[,,]>(BLOCK_CACHE_CAPACITY);
