@@ -26,7 +26,6 @@ namespace game
         private readonly object _lpMeshQueueLock = new object();
         private readonly object _vlpMeshQueueLock = new object();
 
-        private readonly WorldGenerator _worldGenerator;
         private readonly GraphicsDevice _graphicsDevice;
         private Vector3Int _lastPlayerChunkPos;
         private Vector3 _lastPlayerPosition;
@@ -107,7 +106,6 @@ namespace game
             _lowPolyMeshDataQueue = new Queue<MeshDataLowPoly>(512);
             _veryLowPolyMeshDataQueue = new Queue<MeshDataVeryLowPoly>(256);
 
-            _worldGenerator = new WorldGenerator(seed: 412);
             _lastPlayerChunkPos = Vector3Int.Zero;
             _lastPlayerPosition = Vector3.Zero;
         }
@@ -120,7 +118,7 @@ namespace game
             return 2;
         }
 
-        public void Update(Vector3 playerPosition, BoundingFrustum cameraFrustum = null)
+        public void Update(Vector3 playerPosition, WorldGenerator _worldGenerator, BoundingFrustum cameraFrustum = null)
         {
             _lastPlayerPosition = playerPosition;
             Vector3Int currentChunkPos = GetChunkCoordinates(playerPosition);
@@ -157,7 +155,7 @@ namespace game
                 }
             }
 
-            ProcessGenerationQueue();
+            ProcessGenerationQueue(_worldGenerator);
             ProcessMeshDataQueue();
         }
 
@@ -450,7 +448,7 @@ namespace game
 
         private enum ChunkType { HighQuality, LowPoly, VeryLowPoly }
 
-        private void ProcessGenerationQueue()
+        private void ProcessGenerationQueue( WorldGenerator _worldGenerator )
         {
             while (true)
             {
@@ -463,11 +461,11 @@ namespace game
                     if (_generationQueue.Count == 0) return;
                     entry = _generationQueue.Dequeue();
                 }
-                StartChunkGenerationTask(entry.pos, entry.type, entry.level);
+                StartChunkGenerationTask(entry.pos, entry.type, entry.level, _worldGenerator);
             }
         }
 
-        private void StartChunkGenerationTask(Vector3Int cp, ChunkType type, int level)
+        private void StartChunkGenerationTask(Vector3Int cp, ChunkType type, int level, WorldGenerator _worldGenerator )
         {
             lock (_chunkLock)
             {
@@ -503,9 +501,9 @@ namespace game
                 {
                     switch (type)
                     {
-                        case ChunkType.HighQuality: GenerateNormalChunkTask(cp); break;
-                        case ChunkType.LowPoly: GenerateLowPolyChunkTask(cp, level); break;
-                        case ChunkType.VeryLowPoly: GenerateVeryLowPolyChunkTask(cp); break;
+                        case ChunkType.HighQuality: GenerateNormalChunkTask(cp, _worldGenerator); break;
+                        case ChunkType.LowPoly: GenerateLowPolyChunkTask(cp, level, _worldGenerator); break;
+                        case ChunkType.VeryLowPoly: GenerateVeryLowPolyChunkTask(cp, _worldGenerator); break;
                     }
                 }
                 catch (Exception ex)
@@ -524,7 +522,7 @@ namespace game
             });
         }
 
-        private void GenerateNormalChunkTask(Vector3Int cp)
+        private void GenerateNormalChunkTask(Vector3Int cp, WorldGenerator _worldGenerator)
         {
             byte[,,] blocks = _worldGenerator.GetOrGenerateChunk(cp.X, cp.Y, cp.Z, _chunkSize);
             Chunk chunk = null;
@@ -576,7 +574,7 @@ namespace game
             }
         }
 
-        private void GenerateLowPolyChunkTask(Vector3Int cp, int level)
+        private void GenerateLowPolyChunkTask(Vector3Int cp, int level, WorldGenerator _worldGenerator)
         {
             lock (_chunkLock)
             {
@@ -613,7 +611,7 @@ namespace game
                 }
         }
 
-        private void GenerateVeryLowPolyChunkTask(Vector3Int cp)
+        private void GenerateVeryLowPolyChunkTask(Vector3Int cp, WorldGenerator _worldGenerator)
         {
             int[,] heightMap = _worldGenerator.GenerateVeryLowPolyChunk(cp.X, cp.Y, cp.Z, _chunkSize);
             var tmp = new VeryLowPolyChunk(cp.X, cp.Y, cp.Z, _chunkSize);

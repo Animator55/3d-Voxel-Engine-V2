@@ -85,7 +85,16 @@ namespace game
         // ─────────────────────────────────────────────────────────────
         //  Update principal
         // ─────────────────────────────────────────────────────────────
-        public void Update(float dt, Vector3 playerPosition, ChunkManager chunkManager)
+
+        /// <summary>
+        /// physicsEnabled: false cuando la entidad está fuera de zona HQ.
+        /// En ese caso se congela gravedad y colisiones (los chunks LP/VLP
+        /// no tienen datos de bloque accesibles en tiempo real).
+        /// La IA sigue corriendo para que el estado sea coherente al
+        /// volver a entrar en zona HQ.
+        /// </summary>
+        public void Update(float dt, Vector3 playerPosition,
+                           ChunkManager chunkManager, bool physicsEnabled = true)
         {
             // ── Animación de muerte ───────────────────────────────────
             if (LifeState == EntityLifeState.Dying)
@@ -104,12 +113,34 @@ namespace game
             HitFlashTimer = Math.Max(0f, HitFlashTimer - dt);
 
             // ── IA ────────────────────────────────────────────────────
+            // Corre siempre: mantiene estado consistente aunque no haya física.
             if (!Definition.IsStatic && _ai != null)
                 _ai.Update(this, dt, playerPosition);
 
-            // ── Física ────────────────────────────────────────────────
+            // ── Física ───────────────────────────────────────────────
+            // Solo si hay chunks HQ cargados bajo la entidad.
+            // Fuera de esa zona se cancela la velocidad vertical acumulada
+            // para evitar que explote cuando vuelvan los chunks.
             if (!Definition.IsStatic)
-                ApplyPhysics(dt, chunkManager);
+            {
+                if (physicsEnabled)
+                {
+                    ApplyPhysics(dt, chunkManager);
+                }
+                else
+                {
+                    // Congelar eje Y: limpiar velocidad vertical y marcar grounded
+                    // para que no acumule caída libre durante segundos.
+                    Velocity.Y = 0f;
+                    IsGrounded  = true;
+
+                    // Movimiento horizontal de IA sin colisiones: aceptable porque
+                    // en zona LP el terreno es relativamente plano y el error es
+                    // imperceptible a esa distancia.
+                    Position.X += Velocity.X * dt;
+                    Position.Z += Velocity.Z * dt;
+                }
+            }
 
             // ── Visual position ───────────────────────────────────────
             UpdateVisualPosition(dt);

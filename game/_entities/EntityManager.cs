@@ -5,34 +5,11 @@ using System.Collections.Generic;
 
 namespace game
 {
-    /// <summary>
-    /// Gestiona el ciclo de vida completo de todas las entidades del mundo.
-    ///
-    /// Responsabilidades:
-    ///   - Spawn / despawn de entidades.
-    ///   - Update de física + IA.
-    ///   - Renderizado en un único pass.
-    ///   - Generación de partículas al recibir daño / morir.
-    ///   - (Placeholder) Generación de loot al morir.
-    ///   - Detección de hit del jugador (listo para conectar con PlayerRenderer.HitStopTimer).
-    ///
-    /// Uso en Game1:
-    ///   // LoadContent
-    ///   _entityManager = new EntityManager(GraphicsDevice, _particleSystem);
-    ///   _entityManager.Spawn(EntityIds.Pig, new Vector3(10, 65, 10));
-    ///   _entityManager.Spawn(EntityIds.Fern, new Vector3(5, 64, 8));
-    ///
-    ///   // Update
-    ///   _entityManager.Update(gameTime, playerPosition, _chunkManager);
-    ///
-    ///   // Draw (antes del HUD)
-    ///   _entityManager.Draw(gameTime, view, projection);
-    /// </summary>
     public sealed class EntityManager : IDisposable
     {
         // ── Entidades ─────────────────────────────────────────────────
-        private readonly List<Entity>           _entities  = new List<Entity>(256);
-        private readonly List<Entity>           _toRemove  = new List<Entity>(16);
+        private readonly List<Entity> _entities = new List<Entity>(256);
+        private readonly List<Entity> _toRemove = new List<Entity>(16);
         private int _nextInstanceId = 1;
 
         // ── Render ────────────────────────────────────────────────────
@@ -41,12 +18,26 @@ namespace game
         // ── Partículas ────────────────────────────────────────────────
         private readonly ParticleSystem _particles;
 
-        // ── Loot (stub — conectar con sistema de inventario) ──────────
+        // ── Loot ──────────────────────────────────────────────────────
         public event Action<Vector3, LootEntry[]> OnLootDropped;
 
-        // ── Stats accesibles para debug HUD ───────────────────────────
-        public int EntityCount => _entities.Count;
+        // ── Stats para debug HUD ──────────────────────────────────────
+        public int EntityCount   => _entities.Count;
         public int ParticleCount => _particles.AliveCount;
+
+        // ── Constantes de spawn: animales ─────────────────────────────
+        private const int   MaxAnimalsPerType    = 8;
+        private const float AnimalSpawnInterval  = 6f;
+        private const float MinSpawnDist         = 30f;
+        private const float MaxSpawnDist         = 30f;
+
+        // ── Constantes de spawn: vegetación ──────────────────────────
+        private const int MaxVegetationPerType = 20;
+        private const int VegetationGridSize   = 5;
+
+        // ── Estado de spawn ───────────────────────────────────────────
+        private readonly Dictionary<int, float> _spawnCooldowns = new();
+        private readonly Random _spawnRng = new Random();
 
         // ─────────────────────────────────────────────────────────────
         public EntityManager(GraphicsDevice gd, ParticleSystem particles)
@@ -56,13 +47,9 @@ namespace game
         }
 
         // ─────────────────────────────────────────────────────────────
-        //  API de spawn / despawn
+        //  Spawn / despawn
         // ─────────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Crea una nueva instancia de una entidad según su definitionId.
-        /// </summary>
-        /// <returns>La instancia creada, o null si el Id no está registrado.</returns>
         public Entity Spawn(int definitionId, Vector3 position)
         {
             if (!EntityRegistry.TryGet(definitionId, out var def))
@@ -74,7 +61,6 @@ namespace game
 
             var entity = new Entity(_nextInstanceId++, def, position);
 
-            // Suscribir eventos para partículas + loot
             entity.OnDamaged += (pos, amount) => OnEntityDamaged(entity, pos, amount);
             entity.OnDied    += pos            => OnEntityDied(entity, pos);
 
@@ -82,25 +68,14 @@ namespace game
             return entity;
         }
 
-        /// <summary>Elimina una entidad inmediatamente (sin animación).</summary>
-        public void Despawn(Entity entity)
-        {
-            _entities.Remove(entity);
-        }
+        public void Despawn(Entity entity) => _entities.Remove(entity);
 
-        /// <summary>Elimina todas las entidades.</summary>
         public void Clear() => _entities.Clear();
 
         // ─────────────────────────────────────────────────────────────
-        //  Hit del jugador → TakeDamage
+        //  Hit del jugador
         // ─────────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Intenta golpear la entidad más cercana al jugador dentro del rango.
-        /// Diseñado para ser llamado desde Game1 cuando PlayerRenderer.HitStopTimer > 0.
-        ///
-        /// Returns: la entidad golpeada, o null si no había ninguna.
-        /// </summary>
         public Entity TryHitNearest(Vector3 playerPosition, float reach, float damage)
         {
             Entity closest      = null;
@@ -127,10 +102,6 @@ namespace game
             return closest;
         }
 
-        /// <summary>
-        /// Aplica daño a todas las entidades dentro de una esfera.
-        /// Útil para ataques en área.
-        /// </summary>
         public void DamageRadius(Vector3 origin, float radius, float damage)
         {
             float rSq = radius * radius;
@@ -146,35 +117,178 @@ namespace game
         //  Update
         // ─────────────────────────────────────────────────────────────
 
-        public void Update(GameTime gameTime, Vector3 playerPosition, ChunkManager chunkManager)
+        public void Update(GameTime gameTime, Vector3 playerPosition,
+                           ChunkManager chunkManager, int loadDistance,
+                           WorldGenerator worldGen)
         {
             float dt = Math.Min((float)gameTime.ElapsedGameTime.TotalSeconds, 0.05f);
 
+            float chunkSize  = 32f;
+            float hqRadius   = (loadDistance + 0.5f) * chunkSize;
+            float hqRadiusSq = hqRadius * hqRadius;
+            float cullRadius = (loadDistance + 1) * chunkSize;
+            float cullRadiusSq = cullRadius * cullRadius;
+
+            // ── Actualizar entidades existentes ───────────────────────
             foreach (var entity in _entities)
             {
-                entity.Update(dt, playerPosition, chunkManager);
+                float dx     = entity.Position.X - playerPosition.X;
+                float dz     = entity.Position.Z - playerPosition.Z;
+                float distSq = dx * dx + dz * dz;
+
+                if (distSq > cullRadiusSq)
+                {
+                    _toRemove.Add(entity);
+                    continue;
+                }
+
+                bool physicsEnabled = distSq <= hqRadiusSq;
+                entity.Update(dt, playerPosition, chunkManager, physicsEnabled);
 
                 if (entity.LifeState == EntityLifeState.Dead)
                     _toRemove.Add(entity);
             }
 
-            // Limpiar muertas
-            foreach (var e in _toRemove)
-                _entities.Remove(e);
+            foreach (var e in _toRemove) _entities.Remove(e);
             _toRemove.Clear();
 
-            // Actualizar partículas
+            // ── Spawn ─────────────────────────────────────────────────
+            TrySpawnAnimals(dt, playerPosition, worldGen);
+            TrySpawnVegetation(playerPosition, worldGen);
+
+            // ── Partículas ────────────────────────────────────────────
             _particles.Update(dt);
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        //  Spawn: animales
+        // ─────────────────────────────────────────────────────────────
+
+        private void TrySpawnAnimals(float dt, Vector3 playerPos, WorldGenerator worldGen)
+        {
+            int[] types = { EntityIds.Pig, EntityIds.Sheep };
+
+            foreach (int typeId in types)
+            {
+                // ── cooldown por tipo ─────────────────────────────────
+                if (!_spawnCooldowns.ContainsKey(typeId))
+                    _spawnCooldowns[typeId] = 0f;
+
+                _spawnCooldowns[typeId] -= dt;
+                if (_spawnCooldowns[typeId] > 0f) continue;
+
+                // ── cuota por tipo ────────────────────────────────────
+                int count = 0;
+                foreach (var e in _entities)
+                    if (e.Definition.Id == typeId && e.LifeState == EntityLifeState.Alive)
+                        count++;
+
+                if (count >= MaxAnimalsPerType)
+                {
+                    _spawnCooldowns[typeId] = AnimalSpawnInterval;
+                    continue;
+                }
+
+                // ── buscar posición válida (3 intentos) ───────────────
+                bool spawned = false;
+                for (int attempt = 0; attempt < 3 && !spawned; attempt++)
+                {
+                    float angle    = (float)(_spawnRng.NextDouble() * Math.PI * 2);
+                    float distance = MinSpawnDist +
+                                     (float)_spawnRng.NextDouble() * (MaxSpawnDist - MinSpawnDist);
+
+                    float x = playerPos.X + (float)Math.Cos(angle) * distance;
+                    float z = playerPos.Z + (float)Math.Sin(angle) * distance;
+                    float y = worldGen.GetSurfaceHeight(x, z);
+
+                    if (y <= WorldGenerator.SeaLevel) continue;
+
+                    Spawn(typeId, new Vector3(x, y + 1f, z));
+                    spawned = true;
+                }
+
+                _spawnCooldowns[typeId] = AnimalSpawnInterval;
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        //  Spawn: vegetación (determinista por seed)
+        // ─────────────────────────────────────────────────────────────
+
+        private void TrySpawnVegetation(Vector3 playerPos, WorldGenerator worldGen)
+        {
+            int gridOriginX = (int)Math.Floor(playerPos.X / VegetationGridSize) * VegetationGridSize;
+            int gridOriginZ = (int)Math.Floor(playerPos.Z / VegetationGridSize) * VegetationGridSize;
+
+            const int CheckRadius = 12;
+
+            for (int cx = -CheckRadius; cx <= CheckRadius; cx++)
+            for (int cz = -CheckRadius; cz <= CheckRadius; cz++)
+            {
+                int wx = gridOriginX + cx * VegetationGridSize;
+                int wz = gridOriginZ + cz * VegetationGridSize;
+
+                // ── decisión determinista para esta celda ─────────────
+                float rnd     = worldGen.HashCell(wx, wz, seed: 900);
+                float typeRnd = worldGen.HashCell(wx, wz, seed: 901);
+
+                float surfaceY = worldGen.GetSurfaceHeight(wx, wz);
+
+                worldGen.GetBiomeWeights(wx, wz,
+                    out float wPlains, out float wForest, out float wTaiga,
+                    out _, out _, out _);
+
+                // ── filtros de terreno ────────────────────────────────
+                if (surfaceY <= WorldGenerator.SeaLevel)        continue;
+                if (surfaceY >  WorldGenerator.SeaLevel + 45f)  continue;
+
+                // ── probabilidad por bioma ────────────────────────────
+                float fernProb     = wPlains * 0.08f + wForest * 0.55f + wTaiga * 0.40f;
+                float mushroomProb = wPlains * 0.02f + wForest * 0.18f + wTaiga * 0.28f;
+
+                // Hongos solo en zonas bajas y húmedas
+                if (surfaceY > WorldGenerator.SeaLevel + 20f) mushroomProb = 0f;
+
+                float totalProb = fernProb + mushroomProb;
+                if (rnd > totalProb) continue;
+
+                int entityTypeId = typeRnd < fernProb / (totalProb + 0.0001f)
+                    ? EntityIds.Fern
+                    : EntityIds.Mushroom;
+
+                // ── cuota por tipo ────────────────────────────────────
+                int count = 0;
+                foreach (var e in _entities)
+                    if (e.Definition.Id == entityTypeId && e.LifeState == EntityLifeState.Alive)
+                        count++;
+
+                if (count >= MaxVegetationPerType) continue;
+
+                // ── ¿ya existe una planta en esta celda? ──────────────
+                var spawnPos    = new Vector3(wx, surfaceY + 1f, wz);
+                bool alreadyExists = false;
+                foreach (var e in _entities)
+                {
+                    if (e.Definition.Id != EntityIds.Fern &&
+                        e.Definition.Id != EntityIds.Mushroom) continue;
+
+                    if (Math.Abs(e.Position.X - spawnPos.X) < VegetationGridSize * 0.5f &&
+                        Math.Abs(e.Position.Z - spawnPos.Z) < VegetationGridSize * 0.5f)
+                    {
+                        alreadyExists = true;
+                        break;
+                    }
+                }
+                if (alreadyExists) continue;
+
+                Spawn(entityTypeId, spawnPos);
+            }
         }
 
         // ─────────────────────────────────────────────────────────────
         //  Draw
         // ─────────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Dibuja todas las entidades vivas/muriendo + partículas.
-        /// Llamar después del render de chunks y antes del HUD.
-        /// </summary>
         public void Draw(GameTime gameTime, Matrix view, Matrix projection)
         {
             foreach (var entity in _entities)
@@ -195,8 +309,6 @@ namespace game
         {
             _particles.Emit(ParticlePresets.Hit(pos + Vector3.UnitY * 0.5f,
                                                 entity.Definition.HitParticleColor));
-
-            // Polvo en los pies si está en el suelo
             if (entity.IsGrounded)
                 _particles.Emit(ParticlePresets.Dust(pos));
         }
@@ -204,8 +316,6 @@ namespace game
         private void OnEntityDied(Entity entity, Vector3 pos)
         {
             _particles.Emit(ParticlePresets.Death(pos, entity.Definition.DeathParticleColor));
-
-            // Loot
             DropLoot(entity, pos);
         }
 
@@ -214,14 +324,13 @@ namespace game
             if (entity.Definition.LootTable.Count == 0) return;
             if (OnLootDropped == null) return;
 
-            var random = new Random();
-            var drops  = new List<LootEntry>();
-
+            var drops = new List<LootEntry>();
             foreach (var entry in entity.Definition.LootTable)
             {
-                if (random.NextDouble() <= entry.Chance)
+                if (_spawnRng.NextDouble() <= entry.Chance)
                 {
-                    int count = entry.MinCount + random.Next(entry.MaxCount - entry.MinCount + 1);
+                    int count = entry.MinCount +
+                                _spawnRng.Next(entry.MaxCount - entry.MinCount + 1);
                     drops.Add(new LootEntry(entry.ItemId, count, count, 1f));
                 }
             }
@@ -231,10 +340,9 @@ namespace game
         }
 
         // ─────────────────────────────────────────────────────────────
-        //  Acceso de lectura (para HUD, serialización, etc.)
+        //  Acceso de lectura
         // ─────────────────────────────────────────────────────────────
 
-        /// <returns>Snapshot de las entidades actuales (no modificar la lista).</returns>
         public IReadOnlyList<Entity> Entities => _entities;
 
         public void Dispose()

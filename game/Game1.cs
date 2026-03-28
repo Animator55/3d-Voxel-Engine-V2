@@ -54,6 +54,7 @@ namespace game
 
         private RasterizerState _solidState;
         private RasterizerState _wireframeState;
+        private readonly WorldGenerator _worldGenerator;
 
         // ── FPS ───────────────────────────────────────────────────────
         private readonly Stopwatch _frameTimer = Stopwatch.StartNew();
@@ -93,6 +94,7 @@ namespace game
             _graphics.HardwareModeSwitch = false;
             IsFixedTimeStep = false;
             _graphics.ApplyChanges();
+            _worldGenerator = new WorldGenerator(seed: 412);
         }
 
         protected override void Initialize()
@@ -205,9 +207,9 @@ namespace game
             // Spawn de ejemplo
             _entityManager.Spawn(EntityIds.Pig, new Vector3(5, 65, 5));
             _entityManager.Spawn(EntityIds.Sheep, new Vector3(10, 65, 8));
-            _entityManager.Spawn(EntityIds.Fern, new Vector3(3, 64, 3));
-            _entityManager.Spawn(EntityIds.Mushroom, new Vector3(-4, 64, 6));
-            _entityManager.Spawn(EntityIds.Zombie, new Vector3(15, 65, 0));
+            // _entityManager.Spawn(EntityIds.Fern, new Vector3(3, 64, 3));
+            // _entityManager.Spawn(EntityIds.Mushroom, new Vector3(-4, 64, 6));
+            // _entityManager.Spawn(EntityIds.Zombie, new Vector3(15, 65, 0));
         }
 
         private void ApplySettings(GameSettings s)
@@ -286,7 +288,7 @@ namespace game
 
             Vector3 worldPos = _thirdPerson ? _player.VisualPosition
                                            : _camera.Position;
-            _chunkManager.Update(worldPos, null);
+            _chunkManager.Update(worldPos, _worldGenerator, null);
 
             if (_pauseMenu.IsOpen)
             {
@@ -387,13 +389,13 @@ namespace game
             }
 
             Vector3 updatePlayerPos = _thirdPerson ? _player.Position : _camera.Position;
-            _entityManager.Update(gameTime, updatePlayerPos, _chunkManager);
+            _entityManager.Update(gameTime, updatePlayerPos, _chunkManager, _loadDistance, _worldGenerator);
 
             // Conectar ataque del player con el hit de entidades:
             // Cuando el PlayerRenderer entra en HitStopTimer y estamos en 3rd person:
             if (_thirdPerson && _playerRenderer.HitStopTimer > 0f && _lastLMB)
             {
-                const float AttackReach = 2.5f;
+                const float AttackReach = 4f;
                 const float AttackDamage = 4f;
                 _entityManager.TryHitNearest(
                     _player.Position + new Vector3(0f, PlayerController.Height * 0.6f, 0f),

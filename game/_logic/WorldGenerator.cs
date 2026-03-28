@@ -7,7 +7,7 @@ namespace game
     public class WorldGenerator
     {
         private readonly int _seed;
-        private const int SeaLevel = 20;
+        public const int SeaLevel = 20;
         private const int BaseHeight = 20;
         private const int MaxHeight = 160;
         private const int MinHeight = 2;
@@ -372,7 +372,7 @@ namespace game
                 return biome switch
                 {
                     BiomeType.Desert => BlockType.Sand,
-                    BiomeType.Ocean  => BlockType.Stone,
+                    BiomeType.Ocean => BlockType.Stone,
                     _ => terrainH < SeaLevel ? BlockType.Sand
                        : terrainH > SeaLevel ? BlockType.Dirt
                        : BlockType.Water
@@ -386,15 +386,15 @@ namespace game
             if (isRiver) return BlockType.Sand;
             return biome switch
             {
-                BiomeType.Ocean    => h <= SeaLevel - 3 ? BlockType.Stone : BlockType.Sand,
-                BiomeType.Desert   => BlockType.Sand,
+                BiomeType.Ocean => h <= SeaLevel - 3 ? BlockType.Stone : BlockType.Sand,
+                BiomeType.Desert => BlockType.Sand,
                 BiomeType.Mountains => h > SeaLevel + 45 ? BlockType.Snow
                                      : h > SeaLevel + 10 ? BlockType.Stone
                                      : BlockType.Grass,
-                BiomeType.Taiga    => h > SeaLevel + 30 ? BlockType.Snow : BlockType.Grass,
-                BiomeType.Plains   => h <= SeaLevel ? BlockType.Sand : BlockType.Grass,
-                BiomeType.Forest   => h <= SeaLevel ? BlockType.Sand : BlockType.Grass,
-                _                  => BlockType.Grass
+                BiomeType.Taiga => h > SeaLevel + 30 ? BlockType.Snow : BlockType.Grass,
+                BiomeType.Plains => h <= SeaLevel ? BlockType.Sand : BlockType.Grass,
+                BiomeType.Forest => h <= SeaLevel ? BlockType.Sand : BlockType.Grass,
+                _ => BlockType.Grass
             };
         }
 
@@ -502,9 +502,9 @@ namespace game
             int worldX = chunkX * chunkSize, worldY = chunkY * chunkSize, worldZ = chunkZ * chunkSize;
             int area = chunkSize * chunkSize;
 
-            int[] heightsFlat   = ArrayPool<int>.Shared.Rent(area);
+            int[] heightsFlat = ArrayPool<int>.Shared.Rent(area);
             float[] weightsFlat = ArrayPool<float>.Shared.Rent(area * BIOME_COUNT);
-            bool[] riverFlat    = ArrayPool<bool>.Shared.Rent(area);
+            bool[] riverFlat = ArrayPool<bool>.Shared.Rent(area);
 
             try
             {
@@ -644,5 +644,13 @@ namespace game
 
         private static float Hash2Df(int x, int z, int seed)
         { int h = unchecked(seed ^ (x * 374761393) ^ (z * 668265263)); h = unchecked((h ^ (h >> 13)) * 1274126177); h ^= h >> 16; return (float)((uint)h) / uint.MaxValue; }
+
+        public float HashCell(int wx, int wz, int seed)
+            => Hash2Df(wx, wz, _seed + seed);
+        public void GetBiomeWeights(float wx, float wz,
+out float wPlains, out float wForest, out float wTaiga,
+out float wDesert, out float wMountains, out float wOcean)
+=> SoftBiomeWeights(wx, wz, out wPlains, out wForest, out wTaiga,
+                            out wDesert, out wMountains, out wOcean);
     }
 }
