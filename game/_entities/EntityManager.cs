@@ -22,18 +22,18 @@ namespace game
         public event Action<Vector3, LootEntry[]> OnLootDropped;
 
         // ── Stats para debug HUD ──────────────────────────────────────
-        public int EntityCount   => _entities.Count;
+        public int EntityCount => _entities.Count;
         public int ParticleCount => _particles.AliveCount;
 
         // ── Constantes de spawn: animales ─────────────────────────────
-        private const int   MaxAnimalsPerType    = 8;
-        private const float AnimalSpawnInterval  = 6f;
-        private const float MinSpawnDist         = 30f;
-        private const float MaxSpawnDist         = 30f;
+        private const int MaxAnimalsPerType = 5;
+        private const float AnimalSpawnInterval = 30f;
+        private const float MinSpawnDist = 30f;
+        private const float MaxSpawnDist = 30f;
 
         // ── Constantes de spawn: vegetación ──────────────────────────
         private const int MaxVegetationPerType = 20;
-        private const int VegetationGridSize   = 5;
+        private const int VegetationGridSize = 5;
 
         // ── Estado de spawn ───────────────────────────────────────────
         private readonly Dictionary<int, float> _spawnCooldowns = new();
@@ -42,7 +42,7 @@ namespace game
         // ─────────────────────────────────────────────────────────────
         public EntityManager(GraphicsDevice gd, ParticleSystem particles)
         {
-            _renderer  = new EntityRenderer(gd);
+            _renderer = new EntityRenderer(gd);
             _particles = particles;
         }
 
@@ -62,7 +62,7 @@ namespace game
             var entity = new Entity(_nextInstanceId++, def, position);
 
             entity.OnDamaged += (pos, amount) => OnEntityDamaged(entity, pos, amount);
-            entity.OnDied    += pos            => OnEntityDied(entity, pos);
+            entity.OnDied += pos => OnEntityDied(entity, pos);
 
             _entities.Add(entity);
             return entity;
@@ -78,8 +78,8 @@ namespace game
 
         public Entity TryHitNearest(Vector3 playerPosition, float reach, float damage)
         {
-            Entity closest      = null;
-            float  closestDistSq = reach * reach;
+            Entity closest = null;
+            float closestDistSq = reach * reach;
 
             foreach (var e in _entities)
             {
@@ -87,12 +87,12 @@ namespace game
 
                 float distSq = Vector3.DistanceSquared(
                     new Vector3(playerPosition.X, 0f, playerPosition.Z),
-                    new Vector3(e.Position.X,     0f, e.Position.Z));
+                    new Vector3(e.Position.X, 0f, e.Position.Z));
 
                 if (distSq < closestDistSq)
                 {
                     closestDistSq = distSq;
-                    closest       = e;
+                    closest = e;
                 }
             }
 
@@ -118,22 +118,22 @@ namespace game
         // ─────────────────────────────────────────────────────────────
 
         public void Update(GameTime gameTime, Vector3 playerPosition,
-                           ChunkManager chunkManager, int loadDistance,
+                           ChunkManager chunkManager,
                            WorldGenerator worldGen)
         {
             float dt = Math.Min((float)gameTime.ElapsedGameTime.TotalSeconds, 0.05f);
 
-            float chunkSize  = 32f;
-            float hqRadius   = (loadDistance + 0.5f) * chunkSize;
+            float chunkSize = 32f;
+            float hqRadius = (3 + 0.5f) * chunkSize;
             float hqRadiusSq = hqRadius * hqRadius;
-            float cullRadius = (loadDistance + 1) * chunkSize;
+            float cullRadius = (3 + 1) * chunkSize;
             float cullRadiusSq = cullRadius * cullRadius;
 
             // ── Actualizar entidades existentes ───────────────────────
             foreach (var entity in _entities)
             {
-                float dx     = entity.Position.X - playerPosition.X;
-                float dz     = entity.Position.Z - playerPosition.Z;
+                float dx = entity.Position.X - playerPosition.X;
+                float dz = entity.Position.Z - playerPosition.Z;
                 float distSq = dx * dx + dz * dz;
 
                 if (distSq > cullRadiusSq)
@@ -193,7 +193,7 @@ namespace game
                 bool spawned = false;
                 for (int attempt = 0; attempt < 3 && !spawned; attempt++)
                 {
-                    float angle    = (float)(_spawnRng.NextDouble() * Math.PI * 2);
+                    float angle = (float)(_spawnRng.NextDouble() * Math.PI * 2);
                     float distance = MinSpawnDist +
                                      (float)_spawnRng.NextDouble() * (MaxSpawnDist - MinSpawnDist);
 
@@ -223,82 +223,94 @@ namespace game
             const int CheckRadius = 12;
 
             for (int cx = -CheckRadius; cx <= CheckRadius; cx++)
-            for (int cz = -CheckRadius; cz <= CheckRadius; cz++)
-            {
-                int wx = gridOriginX + cx * VegetationGridSize;
-                int wz = gridOriginZ + cz * VegetationGridSize;
-
-                // ── decisión determinista para esta celda ─────────────
-                float rnd     = worldGen.HashCell(wx, wz, seed: 900);
-                float typeRnd = worldGen.HashCell(wx, wz, seed: 901);
-
-                float surfaceY = worldGen.GetSurfaceHeight(wx, wz);
-
-                worldGen.GetBiomeWeights(wx, wz,
-                    out float wPlains, out float wForest, out float wTaiga,
-                    out _, out _, out _);
-
-                // ── filtros de terreno ────────────────────────────────
-                if (surfaceY <= WorldGenerator.SeaLevel)        continue;
-                if (surfaceY >  WorldGenerator.SeaLevel + 45f)  continue;
-
-                // ── probabilidad por bioma ────────────────────────────
-                float fernProb     = wPlains * 0.08f + wForest * 0.55f + wTaiga * 0.40f;
-                float mushroomProb = wPlains * 0.02f + wForest * 0.18f + wTaiga * 0.28f;
-
-                // Hongos solo en zonas bajas y húmedas
-                if (surfaceY > WorldGenerator.SeaLevel + 20f) mushroomProb = 0f;
-
-                float totalProb = fernProb + mushroomProb;
-                if (rnd > totalProb) continue;
-
-                int entityTypeId = typeRnd < fernProb / (totalProb + 0.0001f)
-                    ? EntityIds.Fern
-                    : EntityIds.Mushroom;
-
-                // ── cuota por tipo ────────────────────────────────────
-                int count = 0;
-                foreach (var e in _entities)
-                    if (e.Definition.Id == entityTypeId && e.LifeState == EntityLifeState.Alive)
-                        count++;
-
-                if (count >= MaxVegetationPerType) continue;
-
-                // ── ¿ya existe una planta en esta celda? ──────────────
-                var spawnPos    = new Vector3(wx, surfaceY + 1f, wz);
-                bool alreadyExists = false;
-                foreach (var e in _entities)
+                for (int cz = -CheckRadius; cz <= CheckRadius; cz++)
                 {
-                    if (e.Definition.Id != EntityIds.Fern &&
-                        e.Definition.Id != EntityIds.Mushroom) continue;
+                    int wx = gridOriginX + cx * VegetationGridSize;
+                    int wz = gridOriginZ + cz * VegetationGridSize;
 
-                    if (Math.Abs(e.Position.X - spawnPos.X) < VegetationGridSize * 0.5f &&
-                        Math.Abs(e.Position.Z - spawnPos.Z) < VegetationGridSize * 0.5f)
+                    // ── decisión determinista para esta celda ─────────────
+                    float rnd = worldGen.HashCell(wx, wz, seed: 900);
+                    float typeRnd = worldGen.HashCell(wx, wz, seed: 901);
+
+                    float surfaceY = worldGen.GetSurfaceHeight(wx, wz);
+
+                    worldGen.GetBiomeWeights(wx, wz,
+                        out float wPlains, out float wForest, out float wTaiga,
+                        out _, out _, out _);
+
+                    // ── filtros de terreno ────────────────────────────────
+                    if (surfaceY <= WorldGenerator.SeaLevel) continue;
+                    if (surfaceY > WorldGenerator.SeaLevel + 45f) continue;
+
+                    // ── probabilidad por bioma ────────────────────────────
+                    float fernProb = wPlains * 0.08f + wForest * 0.55f + wTaiga * 0.40f;
+                    float mushroomProb = wPlains * 0.02f + wForest * 0.18f + wTaiga * 0.28f;
+
+                    // Hongos solo en zonas bajas y húmedas
+                    if (surfaceY > WorldGenerator.SeaLevel + 20f) mushroomProb = 0f;
+
+                    float totalProb = fernProb + mushroomProb;
+                    if (rnd > totalProb) continue;
+
+                    int entityTypeId = typeRnd < fernProb / (totalProb + 0.0001f)
+                        ? EntityIds.Fern
+                        : EntityIds.Mushroom;
+
+                    // ── cuota por tipo ────────────────────────────────────
+                    int count = 0;
+                    foreach (var e in _entities)
+                        if (e.Definition.Id == entityTypeId && e.LifeState == EntityLifeState.Alive)
+                            count++;
+
+                    if (count >= MaxVegetationPerType) continue;
+
+                    // ── ¿ya existe una planta en esta celda? ──────────────
+                    var spawnPos = new Vector3(wx, surfaceY + 1f, wz);
+                    bool alreadyExists = false;
+                    foreach (var e in _entities)
                     {
-                        alreadyExists = true;
-                        break;
-                    }
-                }
-                if (alreadyExists) continue;
+                        if (e.Definition.Id != EntityIds.Fern &&
+                            e.Definition.Id != EntityIds.Mushroom) continue;
 
-                Spawn(entityTypeId, spawnPos);
-            }
+                        if (Math.Abs(e.Position.X - spawnPos.X) < VegetationGridSize * 0.5f &&
+                            Math.Abs(e.Position.Z - spawnPos.Z) < VegetationGridSize * 0.5f)
+                        {
+                            alreadyExists = true;
+                            break;
+                        }
+                    }
+                    if (alreadyExists) continue;
+
+                    Spawn(entityTypeId, spawnPos);
+                }
         }
 
         // ─────────────────────────────────────────────────────────────
         //  Draw
         // ─────────────────────────────────────────────────────────────
-
-        public void Draw(GameTime gameTime, Matrix view, Matrix projection)
+        public int Draw(GameTime gameTime, Matrix view, Matrix projection,
+                        BoundingFrustum frustum = null)
         {
+            int visible = 0;
+
             foreach (var entity in _entities)
             {
                 if (entity.LifeState == EntityLifeState.Dead) continue;
+
+                if (frustum != null)
+                {
+                    var sphere = new BoundingSphere(entity.Position + Vector3.UnitY, 2.5f);
+                    if (frustum.Contains(sphere) == ContainmentType.Disjoint)
+                        continue;
+                }
+
                 _renderer.Add(entity, gameTime);
+                visible++;
             }
 
             _renderer.Flush(view, projection);
             _particles.Draw(view, projection);
+            return visible;
         }
 
         // ─────────────────────────────────────────────────────────────

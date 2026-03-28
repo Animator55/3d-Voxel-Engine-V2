@@ -9,7 +9,7 @@ namespace game
         private const float Gravity          = -28f;
         private const float JumpVelocity     = 15f;
         private const float MoveSpeed        = 10f;
-        private const float SprintMultiplier = 1.8f;
+        private const float WalkMultiplier = 0.5f;
         private const float MaxFallSpeed     = 50f;
 
         public const float Width  = 0.6f;
@@ -69,7 +69,7 @@ namespace game
             if (keys.IsKeyDown(Keys.A)) { inputDir.X -= rgtX; inputDir.Z -= rgtZ; }
 
             bool  sprint  = keys.IsKeyDown(Keys.LeftShift);
-            float speed   = MoveSpeed * (sprint ? SprintMultiplier : 1f);
+            float speed   = MoveSpeed * (sprint ? WalkMultiplier : 1f);
             bool  moving  = inputDir.LengthSquared() > 0.001f;
 
             // ← NUEVO: exponer si hay input activo para el renderer
@@ -98,7 +98,7 @@ namespace game
 
             // ── Salto ─────────────────────────────────────────────────
             bool jumpNow = keys.IsKeyDown(Keys.Space);
-            if (jumpNow && !_prevJump && IsGrounded) Velocity.Y = JumpVelocity;
+            if (jumpNow && IsGrounded) Velocity.Y = JumpVelocity;
             _prevJump = jumpNow;
 
             // ── Gravedad ──────────────────────────────────────────────

@@ -36,6 +36,8 @@ namespace game
         private PauseMenu _pauseMenu;
         private bool _lastEscape = false;
         private ParticleSystem _particleSystem;
+        // Campo privado (junto a los demás):
+        private int _visibleEntities;
         private EntityManager _entityManager;
 
 
@@ -325,19 +327,16 @@ namespace game
             _lastF5 = f5;
 
             var mouse = Mouse.GetState();
-
             bool lmbNow = (mouse.LeftButton == ButtonState.Pressed);
             bool rmbNow = (mouse.RightButton == ButtonState.Pressed);
 
             if (_thirdPerson)
             {
-                if (lmbNow && !_lastLMB)
+                if (lmbNow)
                     _playerRenderer.RequestAttack();
-
-                if (rmbNow && !_lastRMB)
+                if (rmbNow && !_lastRMB)   // sheathe sigue siendo one-shot
                     _playerRenderer.RequestSheathe();
             }
-
             _lastLMB = lmbNow;
             _lastRMB = rmbNow;
 
@@ -389,11 +388,11 @@ namespace game
             }
 
             Vector3 updatePlayerPos = _thirdPerson ? _player.Position : _camera.Position;
-            _entityManager.Update(gameTime, updatePlayerPos, _chunkManager, _loadDistance, _worldGenerator);
+            _entityManager.Update(gameTime, updatePlayerPos, _chunkManager, _worldGenerator);
 
             // Conectar ataque del player con el hit de entidades:
             // Cuando el PlayerRenderer entra en HitStopTimer y estamos en 3rd person:
-            if (_thirdPerson && _playerRenderer.HitStopTimer > 0f && _lastLMB)
+            if (_thirdPerson && _playerRenderer.HitStopTimer > 0f && lmbNow)
             {
                 const float AttackReach = 4f;
                 const float AttackDamage = 4f;
@@ -512,7 +511,7 @@ namespace game
                     isMoving: _player.IsMoving);   // ← NUEVO
             }
 
-            _entityManager.Draw(gameTime, activeView, activeProj);
+            _visibleEntities = _entityManager.Draw(gameTime, activeView, activeProj, activeFrustum);
 
             // ─────────────────────────────────────────────────────────
             //  HUD
@@ -540,10 +539,6 @@ namespace game
             string fpsStr = $"{_smoothFps:F0} fps";
             Vector2 sz = _debugFont.MeasureString(fpsStr);
             DrawTS(fpsStr, new Vector2(vw - sz.X - 8, 8), fpsCol);
-
-            string modeStr = _thirdPerson ? "[3P]" : "[FC]";
-            DrawTS(modeStr, new Vector2(vw - sz.X - 8, 8 + LineH),
-                   _thirdPerson ? CWarn : CGood);
         }
 
         private void DrawF3Hud()
@@ -646,6 +641,10 @@ namespace game
             R.Add(("", "", CLabel));
             R.Add(("", "[ Entities ]", CHeader));
             R.Add(("alive", $"{_entityManager.EntityCount}", CValue));
+            R.Add(("visible", $"{_visibleEntities} / {_entityManager.EntityCount}",
+                   _visibleEntities < _entityManager.EntityCount ? CGood : CValue));
+            R.Add(("particles", $"{_entityManager.ParticleCount}", CValue));
+
             R.Add(("particles", $"{_entityManager.ParticleCount}", CValue));
 
             int vw = GraphicsDevice.Viewport.Width;

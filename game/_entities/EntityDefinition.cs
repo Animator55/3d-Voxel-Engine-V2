@@ -77,6 +77,7 @@ namespace game
 
         // ── Partículas al recibir daño / morir ────────────────────────
         public readonly Color HitParticleColor;
+        public float BoundingRadius { get; init; } = 2f;
         public readonly Color DeathParticleColor;
 
         public EntityDefinition(

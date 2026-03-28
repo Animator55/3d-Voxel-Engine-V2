@@ -16,6 +16,9 @@ namespace game
         private const int RiverMaxHeight = 120;
 
         private readonly int[] _perm = new int[512];
+        // Radio máximo que puede ocupar cualquier árbol/estructura
+        private const int MAX_TREE_RADIUS = 12;   // ajustá según tus variantes
+        private const int MAX_STRUCTURE_RADIUS = 32;
 
         private const int BLOCK_CACHE_CAPACITY = 512;
         private readonly LruCache<(int, int, int), byte[,,]> _blockCache;
@@ -102,9 +105,17 @@ namespace game
 
                 PaintRiverBeds(blocks, worldX, worldY, worldZ, chunkSize, heightsFlat, riverFlat);
                 PlaceTrees(blocks, worldX, worldY, worldZ, chunkSize, heightsFlat, weightsFlat, riverFlat, 0);
-
+                // En GenerateChunk y GenerateLowPolyChunk, reemplazar:
                 var structures = StructurePlacer.GetStructuresForChunk(
-                    chunkX, chunkY, chunkZ, chunkSize, _seed, GetSurfaceHeight);
+                    chunkX, chunkY, chunkZ, chunkSize, _seed,
+                    GetSurfaceHeight,
+                    (wx, wz) =>                          // ← lambda para getSurfaceBlock
+                    {
+                        SoftBiomeWeights(wx, wz, out float wPl, out float wFo, out float wTa,
+                                                  out float wDe, out float wMo, out float wOc);
+                        int h = GetTerrainHeight(wx, wz, wPl, wFo, wTa, wDe, wMo, wOc, out bool ir);
+                        return GetSurfaceBlock(DominantBiome(wPl, wFo, wTa, wDe, wMo, wOc), ir, h);
+                    });
                 foreach (var s in structures)
                     StructurePlacer.Apply(blocks, s, chunkX, chunkY, chunkZ, chunkSize, null);
             }
@@ -444,33 +455,90 @@ namespace game
             new TreeVariant{Trunk=_trunk4,Branches=_branches4,Tips=_tips4},
         };
 
-        private void PlaceTrees(byte[,,] blocks, int worldX, int worldY, int worldZ, int chunkSize,
-            int[] heightsFlat, float[] weightsFlat, bool[] riverFlat, int simplificationLevel = 0)
+        private void PlaceTrees(byte[,,] blocks,
+                                 int worldX, int worldY, int worldZ,
+                                 int chunkSize,
+                                 int[] heightsFlat,   // ya no se usa para origen, pero útil
+                                 float[] weightsFlat,
+                                 bool[] riverFlat,
+                                 int simplificationLevel = 0)
         {
             int gridSize = simplificationLevel switch { 0 => 5, 1 => 10, _ => 20 };
-            for (int gx = 0; gx < chunkSize / gridSize + 1; gx++)
-                for (int gz = 0; gz < chunkSize / gridSize + 1; gz++)
+
+            // Cuántas celdas de grilla debemos mirar "hacia afuera" del chunk
+            // para capturar árboles que nacieron fuera pero nos afectan
+            int gridRadius = (MAX_TREE_RADIUS / gridSize) + 1;
+
+            // Rango de celdas de grilla que pueden afectar este chunk
+            int startGX = (int)Math.Floor((float)worldX / gridSize) - gridRadius;
+            int endGX = (int)Math.Floor((float)(worldX + chunkSize - 1) / gridSize) + gridRadius;
+            int startGZ = (int)Math.Floor((float)worldZ / gridSize) - gridRadius;
+            int endGZ = (int)Math.Floor((float)(worldZ + chunkSize - 1) / gridSize) + gridRadius;
+
+            for (int gx = startGX; gx <= endGX; gx++)
+                for (int gz = startGZ; gz <= endGZ; gz++)
                 {
-                    int cwx = worldX + gx * gridSize, cwz = worldZ + gz * gridSize;
-                    float chance = Hash2Df(cwx, cwz, _seed + 200);
+                    // Coordenadas world del origen de la celda de grilla
+                    int cwx = gx * gridSize;
+                    int cwz = gz * gridSize;
+
+                    // Offset aleatorio dentro de la celda (igual que antes)
                     int offX = (int)(Hash2Df(cwx, cwz, _seed + 201) * (gridSize - 1));
                     int offZ = (int)(Hash2Df(cwx, cwz, _seed + 202) * (gridSize - 1));
-                    int lx = gx * gridSize + offX, lz = gz * gridSize + offZ;
-                    if (lx >= chunkSize || lz >= chunkSize) continue;
-                    int idx = lx * chunkSize + lz;
-                    if (riverFlat[idx]) continue;
-                    if (heightsFlat[idx] <= SeaLevel) continue;
-                    int base_ = idx * BIOME_COUNT;
-                    float prob = weightsFlat[base_ + 0] * 0.08f + weightsFlat[base_ + 1] * 0.60f
-                               + weightsFlat[base_ + 2] * 0.35f + weightsFlat[base_ + 3] * 0.00f
-                               + weightsFlat[base_ + 4] * 0.05f + weightsFlat[base_ + 5] * 0.00f;
-                    if (chance > prob) continue;
-                    int ly = heightsFlat[idx] + 1 - worldY;
-                    int vi = Math.Clamp((int)(Hash2Df(cwx + 5, cwz + 5, _seed + 210) * _treeVariants.Length), 0, _treeVariants.Length - 1);
+
+                    int originWX = cwx + offX;
+                    int originWZ = cwz + offZ;
+
+                    if (!TryGetTreeAt(originWX, originWZ, out int vi))
+                        continue;
+
+                    // Posición local del ORIGEN del árbol dentro de este chunk
+                    int lx = originWX - worldX;
+                    int lz = originWZ - worldZ;
+
+                    // Altura en el origen real del árbol
+                    int originH = GetSurfaceHeight(originWX, originWZ);
+                    int ly = originH + 1 - worldY;  // base del tronco en espacio de chunk
+
                     PlaceTreeVariant(blocks, lx, ly, lz, vi, chunkSize);
                 }
         }
+        /// <summary>
+        /// Dado un punto de origen en world-space, decide deterministamente
+        /// si nace un árbol ahí y cuál variante es. No toca ningún array de chunk.
+        /// </summary>
+        private bool TryGetTreeAt(int gridOriginX, int gridOriginZ,
+                                   out int variantIndex)
+        {
+            variantIndex = 0;
 
+            // Misma lógica que tenías en PlaceTrees, pero para UN punto de grilla
+            float chance = Hash2Df(gridOriginX, gridOriginZ, _seed + 200);
+
+            SoftBiomeWeights(gridOriginX, gridOriginZ,
+                out float wPl, out float wFo, out float wTa,
+                out float wDe, out float wMo, out float wOc);
+
+            float prob = wPl * 0.08f + wFo * 0.60f + wTa * 0.35f
+                       + wDe * 0.00f + wMo * 0.05f + wOc * 0.00f;
+
+            if (chance > prob) return false;
+
+            int h = GetSurfaceHeight(gridOriginX, gridOriginZ);
+            if (h <= SeaLevel) return false;
+
+            // ¿es zona de río?
+            GetRiverInfluence(gridOriginX, gridOriginZ, out _);
+            float ri = GetRiverInfluence(gridOriginX, gridOriginZ, out _);
+            if (ri > 0.2f) return false;
+
+            variantIndex = Math.Clamp(
+                (int)(Hash2Df(gridOriginX + 5, gridOriginZ + 5, _seed + 210)
+                      * _treeVariants.Length),
+                0, _treeVariants.Length - 1);
+
+            return true;
+        }
         private void PlaceTreeVariant(byte[,,] blocks, int lx, int ly, int lz, int vi, int size)
         {
             ref readonly var v = ref _treeVariants[vi];
@@ -558,9 +626,17 @@ namespace game
                            heightsFlat, weightsFlat, riverFlat, simplificationLevel);
 
                 if (simplificationLevel == 0)
-                {
+                {// En GenerateChunk y GenerateLowPolyChunk, reemplazar:
                     var structures = StructurePlacer.GetStructuresForChunk(
-                        chunkX, chunkY, chunkZ, chunkSize, _seed, GetSurfaceHeight);
+                        chunkX, chunkY, chunkZ, chunkSize, _seed,
+                        GetSurfaceHeight,
+                        (wx, wz) =>                          // ← lambda para getSurfaceBlock
+                        {
+                            SoftBiomeWeights(wx, wz, out float wPl, out float wFo, out float wTa,
+                                                      out float wDe, out float wMo, out float wOc);
+                            int h = GetTerrainHeight(wx, wz, wPl, wFo, wTa, wDe, wMo, wOc, out bool ir);
+                            return GetSurfaceBlock(DominantBiome(wPl, wFo, wTa, wDe, wMo, wOc), ir, h);
+                        });
                     foreach (var s in structures)
                         StructurePlacer.Apply(blocks, s, chunkX, chunkY, chunkZ, chunkSize, null);
                 }
