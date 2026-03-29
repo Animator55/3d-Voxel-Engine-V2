@@ -12,6 +12,8 @@ namespace game
         private readonly List<Entity> _toRemove = new List<Entity>(16);
         private int _nextInstanceId = 1;
 
+        private readonly int DESPAWN_RADIUS = 2;
+
         // ── Render ────────────────────────────────────────────────────
         private readonly EntityRenderer _renderer;
 
@@ -124,9 +126,9 @@ namespace game
             float dt = Math.Min((float)gameTime.ElapsedGameTime.TotalSeconds, 0.05f);
 
             float chunkSize = 32f;
-            float hqRadius = (3 + 0.5f) * chunkSize;
+            float hqRadius = (DESPAWN_RADIUS + 0.5f) * chunkSize;
             float hqRadiusSq = hqRadius * hqRadius;
-            float cullRadius = (3 + 1) * chunkSize;
+            float cullRadius = (DESPAWN_RADIUS + 1) * chunkSize;
             float cullRadiusSq = cullRadius * cullRadius;
 
             // ── Actualizar entidades existentes ───────────────────────
@@ -292,7 +294,8 @@ namespace game
                         BoundingFrustum frustum = null)
         {
             int visible = 0;
-
+            Matrix invView = Matrix.Invert(view);
+            Vector3 cameraPos = new Vector3(invView.M41, invView.M42, invView.M43);
             foreach (var entity in _entities)
             {
                 if (entity.LifeState == EntityLifeState.Dead) continue;
@@ -303,8 +306,7 @@ namespace game
                     if (frustum.Contains(sphere) == ContainmentType.Disjoint)
                         continue;
                 }
-
-                _renderer.Add(entity, gameTime);
+                _renderer.Add(entity, gameTime, cameraPos);
                 visible++;
             }
 

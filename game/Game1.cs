@@ -21,7 +21,7 @@ namespace game
 
         private Camera _camera;
         private ChunkManager _chunkManager;
-        private int _loadDistance = 1;
+        private int _loadDistance = 3;
 
         // ── Third-person mode ─────────────────────────────────────────
         private bool _thirdPerson = false;

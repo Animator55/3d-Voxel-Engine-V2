@@ -40,533 +40,375 @@ namespace game
     public static class Structures
     {
         // ─────────────────────────────────────────────────────────────────────
-        // CAMPAMENTO BANDIDO
-        // Una fogata central rodeada de troncos y una pequeña empalizada.
-        // Aparece en praderas y nieve; raro pero no rarísimo.
+        // CASTILLO EN RUINAS
+        // Torre central cuadrada con muralla parcial derrumbada y patio.
+        // Aparece en pasto y piedra; muy raro.
         // ─────────────────────────────────────────────────────────────────────
-        public static readonly StructureDef BanditCamp = new StructureDef
+        public static readonly StructureDef RuinedCastle = new StructureDef
         {
-            Name = "BanditCamp",
-            SpawnChance = 0.025f,
-            MinSpacing = 130,
-            ValidSurfaces = new[] { BlockType.Grass, BlockType.Snow },
-            Blocks = new[]
-            {
-                // Fogata central (glowstone = fuego/ascua)
-                new BlockOverride( 0, 0,  0, BlockType.Stone),
-                new BlockOverride( 0, 1,  0, BlockType.Glowstone),
-
-                // Troncos alrededor de la fogata (madera)
-                new BlockOverride( 2, 0,  0, BlockType.Wood),
-                new BlockOverride(-2, 0,  0, BlockType.Wood),
-                new BlockOverride( 0, 0,  2, BlockType.Wood),
-                new BlockOverride( 0, 0, -2, BlockType.Wood),
-
-                // Empalizada: estacas de madera (postes verticales)
-                new BlockOverride( 4, 0, -4, BlockType.Wood),
-                new BlockOverride( 4, 1, -4, BlockType.Wood),
-                new BlockOverride( 4, 2, -4, BlockType.Wood),
-
-                new BlockOverride( 4, 0,  0, BlockType.Wood),
-                new BlockOverride( 4, 1,  0, BlockType.Wood),
-                new BlockOverride( 4, 2,  0, BlockType.Wood),
-
-                new BlockOverride( 4, 0,  4, BlockType.Wood),
-                new BlockOverride( 4, 1,  4, BlockType.Wood),
-                new BlockOverride( 4, 2,  4, BlockType.Wood),
-
-                new BlockOverride(-4, 0, -4, BlockType.Wood),
-                new BlockOverride(-4, 1, -4, BlockType.Wood),
-                new BlockOverride(-4, 2, -4, BlockType.Wood),
-
-                new BlockOverride(-4, 0,  0, BlockType.Wood),
-                new BlockOverride(-4, 1,  0, BlockType.Wood),
-                new BlockOverride(-4, 2,  0, BlockType.Wood),
-
-                new BlockOverride(-4, 0,  4, BlockType.Wood),
-                new BlockOverride(-4, 1,  4, BlockType.Wood),
-                new BlockOverride(-4, 2,  4, BlockType.Wood),
-
-                new BlockOverride( 0, 0, -4, BlockType.Wood),
-                new BlockOverride( 0, 1, -4, BlockType.Wood),
-                new BlockOverride( 0, 2, -4, BlockType.Wood),
-
-                new BlockOverride( 0, 0,  4, BlockType.Wood),
-                new BlockOverride( 0, 1,  4, BlockType.Wood),
-                new BlockOverride( 0, 2,  4, BlockType.Wood),
-
-                // Cofre/caja de botín (stone = crate representado)
-                new BlockOverride( 2, 0, -2, BlockType.Stone),
-                new BlockOverride(-2, 0, -2, BlockType.Stone),
-            }
-        };
-
-        // ─────────────────────────────────────────────────────────────────────
-        // TORRE DE GUARDIA
-        // Torre cuadrada de piedra de ~8 bloques de alto con farola en la cima.
-        // Aparece en pasto y piedra; poco frecuente.
-        // ─────────────────────────────────────────────────────────────────────
-        public static readonly StructureDef WatchTower = new StructureDef
-        {
-            Name = "WatchTower",
-            SpawnChance = 0.018f,
-            MinSpacing = 160,
+            Name = "RuinedCastle",
+            SpawnChance = 0.008f,
+            MinSpacing = 280,
             ValidSurfaces = new[] { BlockType.Grass, BlockType.Stone },
             Blocks = new[]
             {
-                // Base 3×3
-                new BlockOverride(-1, 0, -1, BlockType.Stone), new BlockOverride(0, 0, -1, BlockType.Stone), new BlockOverride(1, 0, -1, BlockType.Stone),
-                new BlockOverride(-1, 0,  0, BlockType.Stone),                                                new BlockOverride(1, 0,  0, BlockType.Stone),
-                new BlockOverride(-1, 0,  1, BlockType.Stone), new BlockOverride(0, 0,  1, BlockType.Stone), new BlockOverride(1, 0,  1, BlockType.Stone),
-
-                // Piso 1
-                new BlockOverride(-1, 1, -1, BlockType.Stone), new BlockOverride(0, 1, -1, BlockType.Stone), new BlockOverride(1, 1, -1, BlockType.Stone),
-                new BlockOverride(-1, 1,  0, BlockType.Stone),                                                new BlockOverride(1, 1,  0, BlockType.Stone),
-                new BlockOverride(-1, 1,  1, BlockType.Stone), new BlockOverride(0, 1,  1, BlockType.Stone), new BlockOverride(1, 1,  1, BlockType.Stone),
-
-                // Piso 2
-                new BlockOverride(-1, 2, -1, BlockType.Stone), new BlockOverride(0, 2, -1, BlockType.Stone), new BlockOverride(1, 2, -1, BlockType.Stone),
-                new BlockOverride(-1, 2,  0, BlockType.Stone),                                                new BlockOverride(1, 2,  0, BlockType.Stone),
-                new BlockOverride(-1, 2,  1, BlockType.Stone), new BlockOverride(0, 2,  1, BlockType.Stone), new BlockOverride(1, 2,  1, BlockType.Stone),
-
-                // Piso 3
-                new BlockOverride(-1, 3, -1, BlockType.Stone), new BlockOverride(0, 3, -1, BlockType.Stone), new BlockOverride(1, 3, -1, BlockType.Stone),
-                new BlockOverride(-1, 3,  0, BlockType.Stone),                                                new BlockOverride(1, 3,  0, BlockType.Stone),
-                new BlockOverride(-1, 3,  1, BlockType.Stone), new BlockOverride(0, 3,  1, BlockType.Stone), new BlockOverride(1, 3,  1, BlockType.Stone),
-
-                // Piso 4
-                new BlockOverride(-1, 4, -1, BlockType.Stone), new BlockOverride(0, 4, -1, BlockType.Stone), new BlockOverride(1, 4, -1, BlockType.Stone),
-                new BlockOverride(-1, 4,  0, BlockType.Stone),                                                new BlockOverride(1, 4,  0, BlockType.Stone),
-                new BlockOverride(-1, 4,  1, BlockType.Stone), new BlockOverride(0, 4,  1, BlockType.Stone), new BlockOverride(1, 4,  1, BlockType.Stone),
-
-                // Plataforma techo + almenas
-                new BlockOverride(-1, 5, -1, BlockType.Stone), new BlockOverride(0, 5, -1, BlockType.Stone), new BlockOverride(1, 5, -1, BlockType.Stone),
-                new BlockOverride(-1, 5,  0, BlockType.Stone), new BlockOverride(0, 5,  0, BlockType.Stone), new BlockOverride(1, 5,  0, BlockType.Stone),
-                new BlockOverride(-1, 5,  1, BlockType.Stone), new BlockOverride(0, 5,  1, BlockType.Stone), new BlockOverride(1, 5,  1, BlockType.Stone),
-
-                // Almenas (esquinas más altas)
-                new BlockOverride(-1, 6, -1, BlockType.Stone), new BlockOverride(1, 6, -1, BlockType.Stone),
-                new BlockOverride(-1, 6,  1, BlockType.Stone), new BlockOverride(1, 6,  1, BlockType.Stone),
-
-                // Antorcha/farola
-                new BlockOverride( 0, 6,  0, BlockType.Glowstone),
-            }
-        };
-
-        // ─────────────────────────────────────────────────────────────────────
-        // CABAÑA CAMPESINA
-        // Casa pequeña de madera y piedra, con techo a dos aguas.
-        // Muy común en praderas.
-        // ─────────────────────────────────────────────────────────────────────
-        public static readonly StructureDef PeasantHut = new StructureDef
-        {
-            Name = "PeasantHut",
-            SpawnChance = 0.04f,
-            MinSpacing = 90,
-            ValidSurfaces = new[] { BlockType.Grass },
-            Blocks = new[]
-            {
-                // Paredes (huecas): 5×5 planta, 3 alto
+                // ── Torre del homenaje (keep) 5×5, 7 pisos ──
                 // Capa 0
-                new BlockOverride(-2, 0, -2, BlockType.Wood), new BlockOverride(-1, 0, -2, BlockType.Wood), new BlockOverride(0, 0, -2, BlockType.Wood), new BlockOverride(1, 0, -2, BlockType.Wood), new BlockOverride(2, 0, -2, BlockType.Wood),
-                new BlockOverride(-2, 0,  2, BlockType.Wood), new BlockOverride(-1, 0,  2, BlockType.Wood), new BlockOverride(0, 0,  2, BlockType.Wood), new BlockOverride(1, 0,  2, BlockType.Wood), new BlockOverride(2, 0,  2, BlockType.Wood),
-                new BlockOverride(-2, 0, -1, BlockType.Wood), new BlockOverride(-2, 0,  0, BlockType.Wood), new BlockOverride(-2, 0,  1, BlockType.Wood),
-                new BlockOverride( 2, 0, -1, BlockType.Wood), new BlockOverride( 2, 0,  0, BlockType.Wood), new BlockOverride( 2, 0,  1, BlockType.Wood),
+                new BlockOverride(-2,0,-2,BlockType.Stone), new BlockOverride(-1,0,-2,BlockType.Stone), new BlockOverride(0,0,-2,BlockType.Stone), new BlockOverride(1,0,-2,BlockType.Stone), new BlockOverride(2,0,-2,BlockType.Stone),
+                new BlockOverride(-2,0, 2,BlockType.Stone), new BlockOverride(-1,0, 2,BlockType.Stone), new BlockOverride(0,0, 2,BlockType.Stone), new BlockOverride(1,0, 2,BlockType.Stone), new BlockOverride(2,0, 2,BlockType.Stone),
+                new BlockOverride(-2,0,-1,BlockType.Stone), new BlockOverride(-2,0, 0,BlockType.Stone), new BlockOverride(-2,0, 1,BlockType.Stone),
+                new BlockOverride( 2,0,-1,BlockType.Stone), new BlockOverride( 2,0, 0,BlockType.Stone), new BlockOverride( 2,0, 1,BlockType.Stone),
+                // Capas 1-6 (huecas)
+                new BlockOverride(-2,1,-2,BlockType.Stone), new BlockOverride(0,1,-2,BlockType.Stone), new BlockOverride(2,1,-2,BlockType.Stone),
+                new BlockOverride(-2,1, 2,BlockType.Stone), new BlockOverride(0,1, 2,BlockType.Stone), new BlockOverride(2,1, 2,BlockType.Stone),
+                new BlockOverride(-2,1,-1,BlockType.Stone), new BlockOverride(-2,1, 0,BlockType.Stone), new BlockOverride(-2,1, 1,BlockType.Stone),
+                new BlockOverride( 2,1,-1,BlockType.Stone), new BlockOverride( 2,1, 0,BlockType.Stone), new BlockOverride( 2,1, 1,BlockType.Stone),
 
-                // Capa 1
-                new BlockOverride(-2, 1, -2, BlockType.Wood), new BlockOverride(-1, 1, -2, BlockType.Wood), new BlockOverride(0, 1, -2, BlockType.Wood), new BlockOverride(1, 1, -2, BlockType.Wood), new BlockOverride(2, 1, -2, BlockType.Wood),
-                new BlockOverride(-2, 1,  2, BlockType.Wood), new BlockOverride(-1, 1,  2, BlockType.Wood), new BlockOverride(0, 1,  2, BlockType.Wood), new BlockOverride(1, 1,  2, BlockType.Wood), new BlockOverride(2, 1,  2, BlockType.Wood),
-                new BlockOverride(-2, 1, -1, BlockType.Wood), new BlockOverride(-2, 1,  0, BlockType.Wood), new BlockOverride(-2, 1,  1, BlockType.Wood),
-                new BlockOverride( 2, 1, -1, BlockType.Wood), new BlockOverride( 2, 1,  0, BlockType.Wood), new BlockOverride( 2, 1,  1, BlockType.Wood),
+                new BlockOverride(-2,2,-2,BlockType.Stone), new BlockOverride(0,2,-2,BlockType.Stone), new BlockOverride(2,2,-2,BlockType.Stone),
+                new BlockOverride(-2,2, 2,BlockType.Stone), new BlockOverride(0,2, 2,BlockType.Stone), new BlockOverride(2,2, 2,BlockType.Stone),
+                new BlockOverride(-2,2,-1,BlockType.Stone), new BlockOverride(-2,2, 0,BlockType.Stone), new BlockOverride(-2,2, 1,BlockType.Stone),
+                new BlockOverride( 2,2,-1,BlockType.Stone), new BlockOverride( 2,2, 0,BlockType.Stone), new BlockOverride( 2,2, 1,BlockType.Stone),
 
-                // Capa 2
-                new BlockOverride(-2, 2, -2, BlockType.Wood), new BlockOverride(-1, 2, -2, BlockType.Wood), new BlockOverride(0, 2, -2, BlockType.Wood), new BlockOverride(1, 2, -2, BlockType.Wood), new BlockOverride(2, 2, -2, BlockType.Wood),
-                new BlockOverride(-2, 2,  2, BlockType.Wood), new BlockOverride(-1, 2,  2, BlockType.Wood), new BlockOverride(0, 2,  2, BlockType.Wood), new BlockOverride(1, 2,  2, BlockType.Wood), new BlockOverride(2, 2,  2, BlockType.Wood),
-                new BlockOverride(-2, 2, -1, BlockType.Wood), new BlockOverride(-2, 2,  0, BlockType.Wood), new BlockOverride(-2, 2,  1, BlockType.Wood),
-                new BlockOverride( 2, 2, -1, BlockType.Wood), new BlockOverride( 2, 2,  0, BlockType.Wood), new BlockOverride( 2, 2,  1, BlockType.Wood),
+                new BlockOverride(-2,3,-2,BlockType.Stone), new BlockOverride(0,3,-2,BlockType.Stone), new BlockOverride(2,3,-2,BlockType.Stone),
+                new BlockOverride(-2,3, 2,BlockType.Stone), new BlockOverride(0,3, 2,BlockType.Stone), new BlockOverride(2,3, 2,BlockType.Stone),
+                new BlockOverride(-2,3,-1,BlockType.Stone), new BlockOverride(-2,3, 0,BlockType.Stone), new BlockOverride(-2,3, 1,BlockType.Stone),
+                new BlockOverride( 2,3,-1,BlockType.Stone), new BlockOverride( 2,3, 0,BlockType.Stone), new BlockOverride( 2,3, 1,BlockType.Stone),
 
-                // Techo a dos aguas (piedra, escalonado)
-                new BlockOverride(-2, 3, -2, BlockType.Stone), new BlockOverride(-1, 3, -2, BlockType.Stone), new BlockOverride(0, 3, -2, BlockType.Stone), new BlockOverride(1, 3, -2, BlockType.Stone), new BlockOverride(2, 3, -2, BlockType.Stone),
-                new BlockOverride(-2, 3,  2, BlockType.Stone), new BlockOverride(-1, 3,  2, BlockType.Stone), new BlockOverride(0, 3,  2, BlockType.Stone), new BlockOverride(1, 3,  2, BlockType.Stone), new BlockOverride(2, 3,  2, BlockType.Stone),
-                new BlockOverride(-2, 3, -1, BlockType.Stone), new BlockOverride(-1, 3, -1, BlockType.Stone), new BlockOverride(0, 3, -1, BlockType.Stone), new BlockOverride(1, 3, -1, BlockType.Stone), new BlockOverride(2, 3, -1, BlockType.Stone),
-                new BlockOverride(-2, 3,  1, BlockType.Stone), new BlockOverride(-1, 3,  1, BlockType.Stone), new BlockOverride(0, 3,  1, BlockType.Stone), new BlockOverride(1, 3,  1, BlockType.Stone), new BlockOverride(2, 3,  1, BlockType.Stone),
-                // Cresta del techo
-                new BlockOverride(-2, 4,  0, BlockType.Stone), new BlockOverride(-1, 4,  0, BlockType.Stone), new BlockOverride(0, 4,  0, BlockType.Stone), new BlockOverride(1, 4,  0, BlockType.Stone), new BlockOverride(2, 4,  0, BlockType.Stone),
+                new BlockOverride(-2,4,-2,BlockType.Stone), new BlockOverride(0,4,-2,BlockType.Stone), new BlockOverride(2,4,-2,BlockType.Stone),
+                new BlockOverride(-2,4, 2,BlockType.Stone), new BlockOverride(0,4, 2,BlockType.Stone), new BlockOverride(2,4, 2,BlockType.Stone),
+                new BlockOverride(-2,4,-1,BlockType.Stone), new BlockOverride(-2,4, 0,BlockType.Stone), new BlockOverride(-2,4, 1,BlockType.Stone),
+                new BlockOverride( 2,4,-1,BlockType.Stone), new BlockOverride( 2,4, 0,BlockType.Stone), new BlockOverride( 2,4, 1,BlockType.Stone),
 
-                // Chimenea con luz
-                new BlockOverride( 2, 3,  0, BlockType.Stone),
-                new BlockOverride( 2, 4,  0, BlockType.Stone),
-                new BlockOverride( 2, 5,  0, BlockType.Glowstone),
+                new BlockOverride(-2,5,-2,BlockType.Stone), new BlockOverride(0,5,-2,BlockType.Stone), new BlockOverride(2,5,-2,BlockType.Stone),
+                new BlockOverride(-2,5, 2,BlockType.Stone), new BlockOverride(0,5, 2,BlockType.Stone), new BlockOverride(2,5, 2,BlockType.Stone),
+                new BlockOverride(-2,5,-1,BlockType.Stone), new BlockOverride(-2,5, 0,BlockType.Stone), new BlockOverride(-2,5, 1,BlockType.Stone),
+                new BlockOverride( 2,5,-1,BlockType.Stone), new BlockOverride( 2,5, 0,BlockType.Stone), new BlockOverride( 2,5, 1,BlockType.Stone),
 
-                // Suelo interior
-                new BlockOverride(-1, 0, -1, BlockType.Stone), new BlockOverride(0, 0, -1, BlockType.Stone), new BlockOverride(1, 0, -1, BlockType.Stone),
-                new BlockOverride(-1, 0,  0, BlockType.Stone), new BlockOverride(0, 0,  0, BlockType.Stone), new BlockOverride(1, 0,  0, BlockType.Stone),
-                new BlockOverride(-1, 0,  1, BlockType.Stone), new BlockOverride(0, 0,  1, BlockType.Stone), new BlockOverride(1, 0,  1, BlockType.Stone),
+                new BlockOverride(-2,6,-2,BlockType.Stone), new BlockOverride(0,6,-2,BlockType.Stone), new BlockOverride(2,6,-2,BlockType.Stone),
+                new BlockOverride(-2,6, 2,BlockType.Stone), new BlockOverride(0,6, 2,BlockType.Stone), new BlockOverride(2,6, 2,BlockType.Stone),
+                new BlockOverride(-2,6,-1,BlockType.Stone), new BlockOverride(-2,6, 0,BlockType.Stone), new BlockOverride(-2,6, 1,BlockType.Stone),
+                new BlockOverride( 2,6,-1,BlockType.Stone), new BlockOverride( 2,6, 0,BlockType.Stone), new BlockOverride( 2,6, 1,BlockType.Stone),
+
+                // Almenas del keep (capa 7)
+                new BlockOverride(-2,7,-2,BlockType.Stone), new BlockOverride(2,7,-2,BlockType.Stone),
+                new BlockOverride(-2,7, 2,BlockType.Stone), new BlockOverride(2,7, 2,BlockType.Stone),
+                new BlockOverride( 0,7,-2,BlockType.Stone),
+                new BlockOverride( 0,7, 2,BlockType.Stone),
+                new BlockOverride(-2,7, 0,BlockType.Stone),
+                new BlockOverride( 2,7, 0,BlockType.Stone),
+
+                // ── Muralla exterior (fragmentos, derrumbada en el lado este) ──
+                // Lado norte (completo)
+                new BlockOverride(-8,0,-8,BlockType.Stone), new BlockOverride(-8,1,-8,BlockType.Stone), new BlockOverride(-8,2,-8,BlockType.Stone),
+                new BlockOverride(-6,0,-8,BlockType.Stone), new BlockOverride(-6,1,-8,BlockType.Stone), new BlockOverride(-6,2,-8,BlockType.Stone),
+                new BlockOverride(-4,0,-8,BlockType.Stone), new BlockOverride(-4,1,-8,BlockType.Stone),
+                new BlockOverride(-2,0,-8,BlockType.Stone), new BlockOverride(-2,1,-8,BlockType.Stone), new BlockOverride(-2,2,-8,BlockType.Stone),
+                new BlockOverride( 0,0,-8,BlockType.Stone), new BlockOverride( 0,1,-8,BlockType.Stone), new BlockOverride( 0,2,-8,BlockType.Stone),
+                new BlockOverride( 2,0,-8,BlockType.Stone), new BlockOverride( 2,1,-8,BlockType.Stone),
+                new BlockOverride( 4,0,-8,BlockType.Stone), new BlockOverride( 4,1,-8,BlockType.Stone), new BlockOverride( 4,2,-8,BlockType.Stone),
+                new BlockOverride( 6,0,-8,BlockType.Stone), new BlockOverride( 6,1,-8,BlockType.Stone), new BlockOverride( 6,2,-8,BlockType.Stone),
+                new BlockOverride( 8,0,-8,BlockType.Stone), new BlockOverride( 8,1,-8,BlockType.Stone), new BlockOverride( 8,2,-8,BlockType.Stone),
+
+                // Lado oeste (completo)
+                new BlockOverride(-8,0,-6,BlockType.Stone), new BlockOverride(-8,1,-6,BlockType.Stone), new BlockOverride(-8,2,-6,BlockType.Stone),
+                new BlockOverride(-8,0,-4,BlockType.Stone), new BlockOverride(-8,1,-4,BlockType.Stone),
+                new BlockOverride(-8,0,-2,BlockType.Stone), new BlockOverride(-8,1,-2,BlockType.Stone), new BlockOverride(-8,2,-2,BlockType.Stone),
+                new BlockOverride(-8,0, 0,BlockType.Stone), new BlockOverride(-8,1, 0,BlockType.Stone), new BlockOverride(-8,2, 0,BlockType.Stone),
+                new BlockOverride(-8,0, 2,BlockType.Stone), new BlockOverride(-8,1, 2,BlockType.Stone),
+                new BlockOverride(-8,0, 4,BlockType.Stone), new BlockOverride(-8,1, 4,BlockType.Stone), new BlockOverride(-8,2, 4,BlockType.Stone),
+                new BlockOverride(-8,0, 6,BlockType.Stone), new BlockOverride(-8,1, 6,BlockType.Stone), new BlockOverride(-8,2, 6,BlockType.Stone),
+                new BlockOverride(-8,0, 8,BlockType.Stone), new BlockOverride(-8,1, 8,BlockType.Stone), new BlockOverride(-8,2, 8,BlockType.Stone),
+
+                // Lado sur (parcialmente derrumbado)
+                new BlockOverride(-8,0, 8,BlockType.Stone), new BlockOverride(-8,1, 8,BlockType.Stone),
+                new BlockOverride(-6,0, 8,BlockType.Stone),
+                new BlockOverride(-4,0, 8,BlockType.Stone), new BlockOverride(-4,1, 8,BlockType.Stone),
+                new BlockOverride(-2,0, 8,BlockType.Stone), new BlockOverride(-2,1, 8,BlockType.Stone), new BlockOverride(-2,2, 8,BlockType.Stone),
+                new BlockOverride( 0,0, 8,BlockType.Stone),
+                new BlockOverride( 2,0, 8,BlockType.Stone), new BlockOverride( 2,1, 8,BlockType.Stone),
+                new BlockOverride( 4,0, 8,BlockType.Stone), new BlockOverride( 4,1, 8,BlockType.Stone), new BlockOverride( 4,2, 8,BlockType.Stone),
+                // Este lado colapsado: sólo escombros en el suelo
+                new BlockOverride( 8,0, 4,BlockType.Stone), new BlockOverride( 8,0, 6,BlockType.Stone),
+                new BlockOverride( 9,0, 5,BlockType.Stone), new BlockOverride( 7,0, 7,BlockType.Stone),
+                new BlockOverride( 6,0, 9,BlockType.Stone), new BlockOverride( 5,0, 8,BlockType.Stone),
+
+                // Escombros sueltos en el patio
+                new BlockOverride(-5,0,-3,BlockType.Stone),
+                new BlockOverride( 3,0, 4,BlockType.Stone), new BlockOverride( 3,1, 4,BlockType.Stone),
+                new BlockOverride(-3,0, 5,BlockType.Stone),
+                new BlockOverride( 5,0,-5,BlockType.Stone), new BlockOverride( 6,0,-4,BlockType.Stone),
             }
         };
 
         // ─────────────────────────────────────────────────────────────────────
-        // TUMBA OLVIDADA
-        // Una lápida de piedra sola, con un pequeño cerco y luz tenue.
-        // Aparece en pasto, piedra y nieve.
+        // GALEÓN VARADO
+        // Casco grande de dos mástiles con cubierta y bodega visible.
+        // Solo en arena; poco frecuente.
         // ─────────────────────────────────────────────────────────────────────
-        public static readonly StructureDef ForgottenGrave = new StructureDef
+        public static readonly StructureDef StrandedGalleon = new StructureDef
         {
-            Name = "ForgottenGrave",
-            SpawnChance = 0.035f,
-            MinSpacing = 70,
-            ValidSurfaces = new[] { BlockType.Grass, BlockType.Stone, BlockType.Snow },
-            Blocks = new[]
-            {
-                // Suelo de la tumba
-                new BlockOverride( 0, 0,  0, BlockType.Stone),
-                new BlockOverride(-1, 0,  0, BlockType.Stone),
-                new BlockOverride( 1, 0,  0, BlockType.Stone),
-
-                // Lápida (vertical)
-                new BlockOverride( 0, 1,  0, BlockType.Stone),
-                new BlockOverride( 0, 2,  0, BlockType.Stone),
-                new BlockOverride(-1, 2,  0, BlockType.Stone),
-                new BlockOverride( 1, 2,  0, BlockType.Stone),
-
-                // Cerco de madera
-                new BlockOverride(-2, 0, -1, BlockType.Wood),
-                new BlockOverride(-2, 1, -1, BlockType.Wood),
-                new BlockOverride(-2, 0,  0, BlockType.Wood),
-                new BlockOverride(-2, 1,  0, BlockType.Wood),
-                new BlockOverride(-2, 0,  1, BlockType.Wood),
-                new BlockOverride(-2, 1,  1, BlockType.Wood),
-
-                new BlockOverride( 2, 0, -1, BlockType.Wood),
-                new BlockOverride( 2, 1, -1, BlockType.Wood),
-                new BlockOverride( 2, 0,  0, BlockType.Wood),
-                new BlockOverride( 2, 1,  0, BlockType.Wood),
-                new BlockOverride( 2, 0,  1, BlockType.Wood),
-                new BlockOverride( 2, 1,  1, BlockType.Wood),
-
-                new BlockOverride(-1, 0, -1, BlockType.Wood),
-                new BlockOverride( 0, 0, -1, BlockType.Wood),
-                new BlockOverride( 1, 0, -1, BlockType.Wood),
-
-                new BlockOverride(-1, 0,  1, BlockType.Wood),
-                new BlockOverride( 0, 0,  1, BlockType.Wood),
-                new BlockOverride( 1, 0,  1, BlockType.Wood),
-
-                // Farolito fantasmal
-                new BlockOverride( 0, 3,  0, BlockType.Glowstone),
-            }
-        };
-
-        // ─────────────────────────────────────────────────────────────────────
-        // POZO DEL PUEBLO
-        // Pozo circular de piedra con brocal y farola.
-        // Muy común en praderas.
-        // ─────────────────────────────────────────────────────────────────────
-        public static readonly StructureDef VillageWell = new StructureDef
-        {
-            Name = "VillageWell",
-            SpawnChance = 0.04f,
-            MinSpacing = 80,
-            ValidSurfaces = new[] { BlockType.Grass },
-            Blocks = new[]
-            {
-                // Brocal (anillo exterior)
-                new BlockOverride(-1, 0, -2, BlockType.Stone), new BlockOverride(0, 0, -2, BlockType.Stone), new BlockOverride(1, 0, -2, BlockType.Stone),
-                new BlockOverride(-1, 0,  2, BlockType.Stone), new BlockOverride(0, 0,  2, BlockType.Stone), new BlockOverride(1, 0,  2, BlockType.Stone),
-                new BlockOverride(-2, 0, -1, BlockType.Stone), new BlockOverride(-2, 0,  0, BlockType.Stone), new BlockOverride(-2, 0,  1, BlockType.Stone),
-                new BlockOverride( 2, 0, -1, BlockType.Stone), new BlockOverride( 2, 0,  0, BlockType.Stone), new BlockOverride( 2, 0,  1, BlockType.Stone),
-
-                // Borde alto del brocal
-                new BlockOverride(-1, 1, -2, BlockType.Stone), new BlockOverride(0, 1, -2, BlockType.Stone), new BlockOverride(1, 1, -2, BlockType.Stone),
-                new BlockOverride(-1, 1,  2, BlockType.Stone), new BlockOverride(0, 1,  2, BlockType.Stone), new BlockOverride(1, 1,  2, BlockType.Stone),
-                new BlockOverride(-2, 1, -1, BlockType.Stone), new BlockOverride(-2, 1,  0, BlockType.Stone), new BlockOverride(-2, 1,  1, BlockType.Stone),
-                new BlockOverride( 2, 1, -1, BlockType.Stone), new BlockOverride( 2, 1,  0, BlockType.Stone), new BlockOverride( 2, 1,  1, BlockType.Stone),
-
-                // Postes del techo
-                new BlockOverride(-2, 2, -2, BlockType.Wood), new BlockOverride(-2, 3, -2, BlockType.Wood), new BlockOverride(-2, 4, -2, BlockType.Wood),
-                new BlockOverride( 2, 2, -2, BlockType.Wood), new BlockOverride( 2, 3, -2, BlockType.Wood), new BlockOverride( 2, 4, -2, BlockType.Wood),
-                new BlockOverride(-2, 2,  2, BlockType.Wood), new BlockOverride(-2, 3,  2, BlockType.Wood), new BlockOverride(-2, 4,  2, BlockType.Wood),
-                new BlockOverride( 2, 2,  2, BlockType.Wood), new BlockOverride( 2, 3,  2, BlockType.Wood), new BlockOverride( 2, 4,  2, BlockType.Wood),
-
-                // Viga horizontal
-                new BlockOverride(-1, 4, -2, BlockType.Wood), new BlockOverride(0, 4, -2, BlockType.Wood), new BlockOverride(1, 4, -2, BlockType.Wood),
-                new BlockOverride(-1, 4,  2, BlockType.Wood), new BlockOverride(0, 4,  2, BlockType.Wood), new BlockOverride(1, 4,  2, BlockType.Wood),
-                new BlockOverride(-2, 4, -1, BlockType.Wood), new BlockOverride(-2, 4,  0, BlockType.Wood), new BlockOverride(-2, 4,  1, BlockType.Wood),
-                new BlockOverride( 2, 4, -1, BlockType.Wood), new BlockOverride( 2, 4,  0, BlockType.Wood), new BlockOverride( 2, 4,  1, BlockType.Wood),
-
-                // Farola colgante central
-                new BlockOverride( 0, 4,  0, BlockType.Wood),
-                new BlockOverride( 0, 3,  0, BlockType.Glowstone),
-            }
-        };
-
-        // ─────────────────────────────────────────────────────────────────────
-        // TEMPLO EN RUINAS
-        // Columnas caídas y altar central; ambiente de civilización perdida.
-        // Aparece en pasto, piedra y arena; raro.
-        // ─────────────────────────────────────────────────────────────────────
-        public static readonly StructureDef AncientTemple = new StructureDef
-        {
-            Name = "AncientTemple",
-            SpawnChance = 0.012f,
-            MinSpacing = 200,
-            ValidSurfaces = new[] { BlockType.Grass, BlockType.Stone, BlockType.Sand },
-            Blocks = new[]
-            {
-                // Plataforma elevada 7×7
-                new BlockOverride(-3,0,-3,BlockType.Stone), new BlockOverride(-2,0,-3,BlockType.Stone), new BlockOverride(-1,0,-3,BlockType.Stone), new BlockOverride(0,0,-3,BlockType.Stone), new BlockOverride(1,0,-3,BlockType.Stone), new BlockOverride(2,0,-3,BlockType.Stone), new BlockOverride(3,0,-3,BlockType.Stone),
-                new BlockOverride(-3,0,-2,BlockType.Stone), new BlockOverride(-2,0,-2,BlockType.Stone), new BlockOverride(-1,0,-2,BlockType.Stone), new BlockOverride(0,0,-2,BlockType.Stone), new BlockOverride(1,0,-2,BlockType.Stone), new BlockOverride(2,0,-2,BlockType.Stone), new BlockOverride(3,0,-2,BlockType.Stone),
-                new BlockOverride(-3,0,-1,BlockType.Stone), new BlockOverride(-2,0,-1,BlockType.Stone), new BlockOverride(-1,0,-1,BlockType.Stone), new BlockOverride(0,0,-1,BlockType.Stone), new BlockOverride(1,0,-1,BlockType.Stone), new BlockOverride(2,0,-1,BlockType.Stone), new BlockOverride(3,0,-1,BlockType.Stone),
-                new BlockOverride(-3,0, 0,BlockType.Stone), new BlockOverride(-2,0, 0,BlockType.Stone), new BlockOverride(-1,0, 0,BlockType.Stone), new BlockOverride(0,0, 0,BlockType.Stone), new BlockOverride(1,0, 0,BlockType.Stone), new BlockOverride(2,0, 0,BlockType.Stone), new BlockOverride(3,0, 0,BlockType.Stone),
-                new BlockOverride(-3,0, 1,BlockType.Stone), new BlockOverride(-2,0, 1,BlockType.Stone), new BlockOverride(-1,0, 1,BlockType.Stone), new BlockOverride(0,0, 1,BlockType.Stone), new BlockOverride(1,0, 1,BlockType.Stone), new BlockOverride(2,0, 1,BlockType.Stone), new BlockOverride(3,0, 1,BlockType.Stone),
-                new BlockOverride(-3,0, 2,BlockType.Stone), new BlockOverride(-2,0, 2,BlockType.Stone), new BlockOverride(-1,0, 2,BlockType.Stone), new BlockOverride(0,0, 2,BlockType.Stone), new BlockOverride(1,0, 2,BlockType.Stone), new BlockOverride(2,0, 2,BlockType.Stone), new BlockOverride(3,0, 2,BlockType.Stone),
-                new BlockOverride(-3,0, 3,BlockType.Stone), new BlockOverride(-2,0, 3,BlockType.Stone), new BlockOverride(-1,0, 3,BlockType.Stone), new BlockOverride(0,0, 3,BlockType.Stone), new BlockOverride(1,0, 3,BlockType.Stone), new BlockOverride(2,0, 3,BlockType.Stone), new BlockOverride(3,0, 3,BlockType.Stone),
-
-                // Columnas (en pie y caídas)
-                // Columna NE (en pie)
-                new BlockOverride( 3, 1, -3, BlockType.Stone), new BlockOverride( 3, 2, -3, BlockType.Stone), new BlockOverride( 3, 3, -3, BlockType.Stone), new BlockOverride( 3, 4, -3, BlockType.Stone),
-                // Columna NO (rota a mitad)
-                new BlockOverride(-3, 1, -3, BlockType.Stone), new BlockOverride(-3, 2, -3, BlockType.Stone),
-                // Columna SE (en pie)
-                new BlockOverride( 3, 1,  3, BlockType.Stone), new BlockOverride( 3, 2,  3, BlockType.Stone), new BlockOverride( 3, 3,  3, BlockType.Stone), new BlockOverride( 3, 4,  3, BlockType.Stone),
-                // Columna SO (caída en el suelo)
-                new BlockOverride(-3, 1,  3, BlockType.Stone),
-                new BlockOverride(-2, 1,  3, BlockType.Stone),
-                new BlockOverride(-1, 1,  3, BlockType.Stone),
-
-                // Altar central
-                new BlockOverride( 0, 1,  0, BlockType.Stone),
-                new BlockOverride( 0, 2,  0, BlockType.Stone),
-                new BlockOverride(-1, 1,  0, BlockType.Stone), new BlockOverride( 1, 1,  0, BlockType.Stone),
-                new BlockOverride( 0, 1, -1, BlockType.Stone), new BlockOverride( 0, 1,  1, BlockType.Stone),
-
-                // Llama del altar
-                new BlockOverride( 0, 3,  0, BlockType.Glowstone),
-            }
-        };
-
-        // ─────────────────────────────────────────────────────────────────────
-        // MONOLITO RÚNICO
-        // Una sola piedra vertical gigante con inscripciones (glowstone).
-        // Aparece en cualquier bioma sólido; muy raro.
-        // ─────────────────────────────────────────────────────────────────────
-        public static readonly StructureDef RunicMonolith = new StructureDef
-        {
-            Name = "RunicMonolith",
-            SpawnChance = 0.014f,
-            MinSpacing = 220,
-            ValidSurfaces = new[] { BlockType.Grass, BlockType.Stone, BlockType.Snow, BlockType.Sand },
-            Blocks = new[]
-            {
-                // Base ancha
-                new BlockOverride(-1, 0, -1, BlockType.Stone), new BlockOverride(0, 0, -1, BlockType.Stone), new BlockOverride(1, 0, -1, BlockType.Stone),
-                new BlockOverride(-1, 0,  0, BlockType.Stone),                                                new BlockOverride(1, 0,  0, BlockType.Stone),
-                new BlockOverride(-1, 0,  1, BlockType.Stone), new BlockOverride(0, 0,  1, BlockType.Stone), new BlockOverride(1, 0,  1, BlockType.Stone),
-                new BlockOverride( 0, 0,  0, BlockType.Stone),
-
-                // Columna central alta
-                new BlockOverride( 0, 1, 0, BlockType.Stone),
-                new BlockOverride( 0, 2, 0, BlockType.Stone),
-                new BlockOverride( 0, 3, 0, BlockType.Stone),
-                new BlockOverride( 0, 4, 0, BlockType.Stone),
-                new BlockOverride( 0, 5, 0, BlockType.Stone),
-                new BlockOverride( 0, 6, 0, BlockType.Stone),
-                new BlockOverride( 0, 7, 0, BlockType.Stone),
-
-                // Runas brillantes (glowstone incrustado)
-                new BlockOverride( 0, 2, 0, BlockType.Glowstone),
-                new BlockOverride( 0, 4, 0, BlockType.Glowstone),
-                new BlockOverride( 0, 6, 0, BlockType.Glowstone),
-
-                // Cima
-                new BlockOverride(-1, 8, 0, BlockType.Stone), new BlockOverride(0, 8, 0, BlockType.Stone), new BlockOverride(1, 8, 0, BlockType.Stone),
-                new BlockOverride( 0, 9, 0, BlockType.Stone),
-            }
-        };
-
-        // ─────────────────────────────────────────────────────────────────────
-        // NAVE ENCALLADA
-        // Casco de barco de madera varado; solo en arena (costas).
-        // ─────────────────────────────────────────────────────────────────────
-        public static readonly StructureDef ShipwreckHull = new StructureDef
-        {
-            Name = "ShipwreckHull",
-            SpawnChance = 0.022f,
-            MinSpacing = 140,
+            Name = "StrandedGalleon",
+            SpawnChance = 0.015f,
+            MinSpacing = 180,
             ValidSurfaces = new[] { BlockType.Sand },
             Blocks = new[]
             {
-                // Quilla (keel)
-                new BlockOverride(-4, 0,  0, BlockType.Wood), new BlockOverride(-3, 0,  0, BlockType.Wood), new BlockOverride(-2, 0,  0, BlockType.Wood),
-                new BlockOverride(-1, 0,  0, BlockType.Wood), new BlockOverride( 0, 0,  0, BlockType.Wood), new BlockOverride( 1, 0,  0, BlockType.Wood),
-                new BlockOverride( 2, 0,  0, BlockType.Wood), new BlockOverride( 3, 0,  0, BlockType.Wood), new BlockOverride( 4, 0,  0, BlockType.Wood),
+                // ── Quilla y fondo del casco ──
+                new BlockOverride(-7,0,0,BlockType.Wood), new BlockOverride(-6,0,0,BlockType.Wood), new BlockOverride(-5,0,0,BlockType.Wood),
+                new BlockOverride(-4,0,0,BlockType.Wood), new BlockOverride(-3,0,0,BlockType.Wood), new BlockOverride(-2,0,0,BlockType.Wood),
+                new BlockOverride(-1,0,0,BlockType.Wood), new BlockOverride( 0,0,0,BlockType.Wood), new BlockOverride( 1,0,0,BlockType.Wood),
+                new BlockOverride( 2,0,0,BlockType.Wood), new BlockOverride( 3,0,0,BlockType.Wood), new BlockOverride( 4,0,0,BlockType.Wood),
+                new BlockOverride( 5,0,0,BlockType.Wood), new BlockOverride( 6,0,0,BlockType.Wood), new BlockOverride( 7,0,0,BlockType.Wood),
 
-                // Costillar (cuadernas) cada 2 bloques
-                new BlockOverride(-4, 1, -1, BlockType.Wood), new BlockOverride(-4, 1,  1, BlockType.Wood), new BlockOverride(-4, 2,  0, BlockType.Wood),
-                new BlockOverride(-2, 1, -2, BlockType.Wood), new BlockOverride(-2, 1,  2, BlockType.Wood), new BlockOverride(-2, 2, -2, BlockType.Wood), new BlockOverride(-2, 2,  2, BlockType.Wood),
-                new BlockOverride( 0, 1, -2, BlockType.Wood), new BlockOverride( 0, 1,  2, BlockType.Wood), new BlockOverride( 0, 2, -2, BlockType.Wood), new BlockOverride( 0, 2,  2, BlockType.Wood),
-                new BlockOverride( 2, 1, -2, BlockType.Wood), new BlockOverride( 2, 1,  2, BlockType.Wood), new BlockOverride( 2, 2, -2, BlockType.Wood), new BlockOverride( 2, 2,  2, BlockType.Wood),
-                new BlockOverride( 4, 1, -1, BlockType.Wood), new BlockOverride( 4, 1,  1, BlockType.Wood), new BlockOverride( 4, 2,  0, BlockType.Wood),
+                // ── Costillas/cuadernas (cada 2) ──
+                new BlockOverride(-7,1,-1,BlockType.Wood), new BlockOverride(-7,1, 1,BlockType.Wood), new BlockOverride(-7,2, 0,BlockType.Wood),
 
-                // Tablones de borda (bordes superiores)
-                new BlockOverride(-3, 2, -1, BlockType.Wood), new BlockOverride(-3, 2,  1, BlockType.Wood),
-                new BlockOverride(-1, 2, -2, BlockType.Wood), new BlockOverride(-1, 2,  2, BlockType.Wood),
-                new BlockOverride( 1, 2, -2, BlockType.Wood), new BlockOverride( 1, 2,  2, BlockType.Wood),
-                new BlockOverride( 3, 2, -1, BlockType.Wood), new BlockOverride( 3, 2,  1, BlockType.Wood),
+                new BlockOverride(-5,1,-2,BlockType.Wood), new BlockOverride(-5,1, 2,BlockType.Wood),
+                new BlockOverride(-5,2,-2,BlockType.Wood), new BlockOverride(-5,2, 2,BlockType.Wood),
+                new BlockOverride(-5,3,-1,BlockType.Wood), new BlockOverride(-5,3, 1,BlockType.Wood),
 
-                // Mástil caído (horizontal)
-                new BlockOverride(-1, 3,  0, BlockType.Wood),
-                new BlockOverride( 0, 3,  0, BlockType.Wood),
-                new BlockOverride( 1, 3,  0, BlockType.Wood),
-                new BlockOverride( 2, 3,  0, BlockType.Wood),
-                new BlockOverride( 3, 3,  0, BlockType.Wood),
+                new BlockOverride(-3,1,-2,BlockType.Wood), new BlockOverride(-3,1, 2,BlockType.Wood),
+                new BlockOverride(-3,2,-2,BlockType.Wood), new BlockOverride(-3,2, 2,BlockType.Wood),
+                new BlockOverride(-3,3,-1,BlockType.Wood), new BlockOverride(-3,3, 1,BlockType.Wood),
 
-                // Farolito en la proa
-                new BlockOverride(-4, 2,  0, BlockType.Glowstone),
+                new BlockOverride(-1,1,-3,BlockType.Wood), new BlockOverride(-1,1, 3,BlockType.Wood),
+                new BlockOverride(-1,2,-3,BlockType.Wood), new BlockOverride(-1,2, 3,BlockType.Wood),
+                new BlockOverride(-1,3,-2,BlockType.Wood), new BlockOverride(-1,3, 2,BlockType.Wood),
+
+                new BlockOverride( 1,1,-3,BlockType.Wood), new BlockOverride( 1,1, 3,BlockType.Wood),
+                new BlockOverride( 1,2,-3,BlockType.Wood), new BlockOverride( 1,2, 3,BlockType.Wood),
+                new BlockOverride( 1,3,-2,BlockType.Wood), new BlockOverride( 1,3, 2,BlockType.Wood),
+
+                new BlockOverride( 3,1,-2,BlockType.Wood), new BlockOverride( 3,1, 2,BlockType.Wood),
+                new BlockOverride( 3,2,-2,BlockType.Wood), new BlockOverride( 3,2, 2,BlockType.Wood),
+                new BlockOverride( 3,3,-1,BlockType.Wood), new BlockOverride( 3,3, 1,BlockType.Wood),
+
+                new BlockOverride( 5,1,-2,BlockType.Wood), new BlockOverride( 5,1, 2,BlockType.Wood),
+                new BlockOverride( 5,2,-2,BlockType.Wood), new BlockOverride( 5,2, 2,BlockType.Wood),
+                new BlockOverride( 5,3,-1,BlockType.Wood), new BlockOverride( 5,3, 1,BlockType.Wood),
+
+                new BlockOverride( 7,1,-1,BlockType.Wood), new BlockOverride( 7,1, 1,BlockType.Wood), new BlockOverride( 7,2, 0,BlockType.Wood),
+
+                // ── Tablones de borda (cubierta) ──
+                new BlockOverride(-6,3,-1,BlockType.Wood), new BlockOverride(-6,3, 0,BlockType.Wood), new BlockOverride(-6,3, 1,BlockType.Wood),
+                new BlockOverride(-4,3,-2,BlockType.Wood), new BlockOverride(-4,3,-1,BlockType.Wood), new BlockOverride(-4,3, 0,BlockType.Wood), new BlockOverride(-4,3, 1,BlockType.Wood), new BlockOverride(-4,3, 2,BlockType.Wood),
+                new BlockOverride(-2,3,-2,BlockType.Wood), new BlockOverride(-2,3,-1,BlockType.Wood), new BlockOverride(-2,3, 0,BlockType.Wood), new BlockOverride(-2,3, 1,BlockType.Wood), new BlockOverride(-2,3, 2,BlockType.Wood),
+                new BlockOverride( 0,3,-2,BlockType.Wood), new BlockOverride( 0,3,-1,BlockType.Wood), new BlockOverride( 0,3, 0,BlockType.Wood), new BlockOverride( 0,3, 1,BlockType.Wood), new BlockOverride( 0,3, 2,BlockType.Wood),
+                new BlockOverride( 2,3,-2,BlockType.Wood), new BlockOverride( 2,3,-1,BlockType.Wood), new BlockOverride( 2,3, 0,BlockType.Wood), new BlockOverride( 2,3, 1,BlockType.Wood), new BlockOverride( 2,3, 2,BlockType.Wood),
+                new BlockOverride( 4,3,-2,BlockType.Wood), new BlockOverride( 4,3,-1,BlockType.Wood), new BlockOverride( 4,3, 0,BlockType.Wood), new BlockOverride( 4,3, 1,BlockType.Wood), new BlockOverride( 4,3, 2,BlockType.Wood),
+                new BlockOverride( 6,3,-1,BlockType.Wood), new BlockOverride( 6,3, 0,BlockType.Wood), new BlockOverride( 6,3, 1,BlockType.Wood),
+
+                // ── Castillo de popa (superestructura trasera) ──
+                new BlockOverride(-7,3,-1,BlockType.Wood), new BlockOverride(-7,3, 0,BlockType.Wood), new BlockOverride(-7,3, 1,BlockType.Wood),
+                new BlockOverride(-7,4,-1,BlockType.Wood), new BlockOverride(-7,4, 0,BlockType.Wood), new BlockOverride(-7,4, 1,BlockType.Wood),
+                new BlockOverride(-6,4,-1,BlockType.Wood), new BlockOverride(-6,4, 0,BlockType.Wood), new BlockOverride(-6,4, 1,BlockType.Wood),
+
+                // ── Mástil mayor (de pie, inclinado) ──
+                new BlockOverride( 0,4, 0,BlockType.Wood),
+                new BlockOverride( 0,5, 0,BlockType.Wood),
+                new BlockOverride( 0,6, 0,BlockType.Wood),
+                new BlockOverride( 0,7, 0,BlockType.Wood),
+                new BlockOverride(-1,8, 0,BlockType.Wood),
+                new BlockOverride(-1,9, 0,BlockType.Wood),
+                // Verga transversal
+                new BlockOverride(-3,7, 0,BlockType.Wood), new BlockOverride(-2,7, 0,BlockType.Wood),
+                new BlockOverride( 1,7, 0,BlockType.Wood), new BlockOverride( 2,7, 0,BlockType.Wood), new BlockOverride( 3,7, 0,BlockType.Wood),
+
+                // ── Mástil de proa (caído en diagonal) ──
+                new BlockOverride( 5,4, 0,BlockType.Wood),
+                new BlockOverride( 6,4, 0,BlockType.Wood),
+                new BlockOverride( 7,4, 0,BlockType.Wood),
+                new BlockOverride( 8,3, 0,BlockType.Wood),
+                new BlockOverride( 9,3, 0,BlockType.Wood),
+
+                // ── Escombros y cofres en cubierta ──
+                new BlockOverride(-2,4, 1,BlockType.Stone),
+                new BlockOverride( 2,4,-1,BlockType.Stone),
             }
         };
 
         // ─────────────────────────────────────────────────────────────────────
-        // PORTAL ARCANO
-        // Un arco de piedra con piedras caídas y energía mágica brillando.
-        // Muy raro, aparece en pasto y nieve.
+        // TORRE DEL RELOJ
+        // Torre alta y esbelta de piedra con un cuerpo de reloj cuadrado arriba.
+        // Aparece en pasto; poco frecuente.
         // ─────────────────────────────────────────────────────────────────────
-        public static readonly StructureDef ArcanePortal = new StructureDef
+        public static readonly StructureDef ClockTower = new StructureDef
         {
-            Name = "ArcanePortal",
-            SpawnChance = 0.009f,
-            MinSpacing = 250,
-            ValidSurfaces = new[] { BlockType.Grass, BlockType.Snow },
+            Name = "ClockTower",
+            SpawnChance = 0.016f,
+            MinSpacing = 150,
+            ValidSurfaces = new[] { BlockType.Grass },
             Blocks = new[]
             {
-                // Base del arco (dos pilares)
-                new BlockOverride(-2, 0, 0, BlockType.Stone), new BlockOverride(-2, 1, 0, BlockType.Stone), new BlockOverride(-2, 2, 0, BlockType.Stone),
-                new BlockOverride(-2, 3, 0, BlockType.Stone), new BlockOverride(-2, 4, 0, BlockType.Stone),
-                new BlockOverride( 2, 0, 0, BlockType.Stone), new BlockOverride( 2, 1, 0, BlockType.Stone), new BlockOverride( 2, 2, 0, BlockType.Stone),
-                new BlockOverride( 2, 3, 0, BlockType.Stone), new BlockOverride( 2, 4, 0, BlockType.Stone),
+                // ── Fuste de la torre (hueco, 3×3, 8 pisos) ──
+                // Capa 0
+                new BlockOverride(-1,0,-1,BlockType.Stone), new BlockOverride(0,0,-1,BlockType.Stone), new BlockOverride(1,0,-1,BlockType.Stone),
+                new BlockOverride(-1,0, 0,BlockType.Stone),                                             new BlockOverride(1,0, 0,BlockType.Stone),
+                new BlockOverride(-1,0, 1,BlockType.Stone), new BlockOverride(0,0, 1,BlockType.Stone), new BlockOverride(1,0, 1,BlockType.Stone),
+                // Capas 1-7 (paredes huecas)
+                new BlockOverride(-1,1,-1,BlockType.Stone), new BlockOverride(0,1,-1,BlockType.Stone), new BlockOverride(1,1,-1,BlockType.Stone),
+                new BlockOverride(-1,1, 0,BlockType.Stone),                                             new BlockOverride(1,1, 0,BlockType.Stone),
+                new BlockOverride(-1,1, 1,BlockType.Stone), new BlockOverride(0,1, 1,BlockType.Stone), new BlockOverride(1,1, 1,BlockType.Stone),
 
-                // Arco superior
-                new BlockOverride(-1, 5, 0, BlockType.Stone), new BlockOverride(0, 5, 0, BlockType.Stone), new BlockOverride(1, 5, 0, BlockType.Stone),
-                new BlockOverride(-2, 5, 0, BlockType.Stone), new BlockOverride(2, 5, 0, BlockType.Stone),
+                new BlockOverride(-1,2,-1,BlockType.Stone), new BlockOverride(0,2,-1,BlockType.Stone), new BlockOverride(1,2,-1,BlockType.Stone),
+                new BlockOverride(-1,2, 0,BlockType.Stone),                                             new BlockOverride(1,2, 0,BlockType.Stone),
+                new BlockOverride(-1,2, 1,BlockType.Stone), new BlockOverride(0,2, 1,BlockType.Stone), new BlockOverride(1,2, 1,BlockType.Stone),
 
-                // Clave del arco con brillo
-                new BlockOverride( 0, 6, 0, BlockType.Glowstone),
+                new BlockOverride(-1,3,-1,BlockType.Stone), new BlockOverride(0,3,-1,BlockType.Stone), new BlockOverride(1,3,-1,BlockType.Stone),
+                new BlockOverride(-1,3, 0,BlockType.Stone),                                             new BlockOverride(1,3, 0,BlockType.Stone),
+                new BlockOverride(-1,3, 1,BlockType.Stone), new BlockOverride(0,3, 1,BlockType.Stone), new BlockOverride(1,3, 1,BlockType.Stone),
 
-                // Piedras caídas alrededor (ruinas)
-                new BlockOverride(-3, 0,  1, BlockType.Stone), new BlockOverride(-3, 1,  1, BlockType.Stone),
-                new BlockOverride( 3, 0, -1, BlockType.Stone),
-                new BlockOverride(-4, 0,  0, BlockType.Stone),
-                new BlockOverride( 4, 0,  2, BlockType.Stone), new BlockOverride( 3, 0,  2, BlockType.Stone),
-                new BlockOverride( 4, 0, -2, BlockType.Stone),
+                new BlockOverride(-1,4,-1,BlockType.Stone), new BlockOverride(0,4,-1,BlockType.Stone), new BlockOverride(1,4,-1,BlockType.Stone),
+                new BlockOverride(-1,4, 0,BlockType.Stone),                                             new BlockOverride(1,4, 0,BlockType.Stone),
+                new BlockOverride(-1,4, 1,BlockType.Stone), new BlockOverride(0,4, 1,BlockType.Stone), new BlockOverride(1,4, 1,BlockType.Stone),
 
-                // Energía interior del portal (brillante)
-                new BlockOverride(-1, 1, 0, BlockType.Glowstone), new BlockOverride(0, 1, 0, BlockType.Glowstone), new BlockOverride(1, 1, 0, BlockType.Glowstone),
-                new BlockOverride(-1, 2, 0, BlockType.Glowstone), new BlockOverride(0, 2, 0, BlockType.Glowstone), new BlockOverride(1, 2, 0, BlockType.Glowstone),
-                new BlockOverride(-1, 3, 0, BlockType.Glowstone), new BlockOverride(0, 3, 0, BlockType.Glowstone), new BlockOverride(1, 3, 0, BlockType.Glowstone),
-                new BlockOverride(-1, 4, 0, BlockType.Glowstone), new BlockOverride(0, 4, 0, BlockType.Glowstone), new BlockOverride(1, 4, 0, BlockType.Glowstone),
+                new BlockOverride(-1,5,-1,BlockType.Stone), new BlockOverride(0,5,-1,BlockType.Stone), new BlockOverride(1,5,-1,BlockType.Stone),
+                new BlockOverride(-1,5, 0,BlockType.Stone),                                             new BlockOverride(1,5, 0,BlockType.Stone),
+                new BlockOverride(-1,5, 1,BlockType.Stone), new BlockOverride(0,5, 1,BlockType.Stone), new BlockOverride(1,5, 1,BlockType.Stone),
+
+                new BlockOverride(-1,6,-1,BlockType.Stone), new BlockOverride(0,6,-1,BlockType.Stone), new BlockOverride(1,6,-1,BlockType.Stone),
+                new BlockOverride(-1,6, 0,BlockType.Stone),                                             new BlockOverride(1,6, 0,BlockType.Stone),
+                new BlockOverride(-1,6, 1,BlockType.Stone), new BlockOverride(0,6, 1,BlockType.Stone), new BlockOverride(1,6, 1,BlockType.Stone),
+
+                new BlockOverride(-1,7,-1,BlockType.Stone), new BlockOverride(0,7,-1,BlockType.Stone), new BlockOverride(1,7,-1,BlockType.Stone),
+                new BlockOverride(-1,7, 0,BlockType.Stone),                                             new BlockOverride(1,7, 0,BlockType.Stone),
+                new BlockOverride(-1,7, 1,BlockType.Stone), new BlockOverride(0,7, 1,BlockType.Stone), new BlockOverride(1,7, 1,BlockType.Stone),
+
+                // ── Cuerpo del reloj (5×5 macizo, capa 8) ──
+                new BlockOverride(-2,8,-2,BlockType.Stone), new BlockOverride(-1,8,-2,BlockType.Stone), new BlockOverride(0,8,-2,BlockType.Stone), new BlockOverride(1,8,-2,BlockType.Stone), new BlockOverride(2,8,-2,BlockType.Stone),
+                new BlockOverride(-2,8,-1,BlockType.Stone), new BlockOverride(-1,8,-1,BlockType.Stone), new BlockOverride(0,8,-1,BlockType.Stone), new BlockOverride(1,8,-1,BlockType.Stone), new BlockOverride(2,8,-1,BlockType.Stone),
+                new BlockOverride(-2,8, 0,BlockType.Stone), new BlockOverride(-1,8, 0,BlockType.Stone), new BlockOverride(0,8, 0,BlockType.Stone), new BlockOverride(1,8, 0,BlockType.Stone), new BlockOverride(2,8, 0,BlockType.Stone),
+                new BlockOverride(-2,8, 1,BlockType.Stone), new BlockOverride(-1,8, 1,BlockType.Stone), new BlockOverride(0,8, 1,BlockType.Stone), new BlockOverride(1,8, 1,BlockType.Stone), new BlockOverride(2,8, 1,BlockType.Stone),
+                new BlockOverride(-2,8, 2,BlockType.Stone), new BlockOverride(-1,8, 2,BlockType.Stone), new BlockOverride(0,8, 2,BlockType.Stone), new BlockOverride(1,8, 2,BlockType.Stone), new BlockOverride(2,8, 2,BlockType.Stone),
+                // Capa 9 del cuerpo del reloj
+                new BlockOverride(-2,9,-2,BlockType.Stone), new BlockOverride(-1,9,-2,BlockType.Stone), new BlockOverride(0,9,-2,BlockType.Stone), new BlockOverride(1,9,-2,BlockType.Stone), new BlockOverride(2,9,-2,BlockType.Stone),
+                new BlockOverride(-2,9,-1,BlockType.Stone), new BlockOverride(1,9,-1,BlockType.Stone), new BlockOverride(2,9,-1,BlockType.Stone), new BlockOverride(-1,9,-1,BlockType.Stone),
+                new BlockOverride(-2,9, 0,BlockType.Stone), new BlockOverride(2,9, 0,BlockType.Stone),
+                new BlockOverride(-2,9, 1,BlockType.Stone), new BlockOverride(-1,9, 1,BlockType.Stone), new BlockOverride(1,9, 1,BlockType.Stone), new BlockOverride(2,9, 1,BlockType.Stone),
+                new BlockOverride(-2,9, 2,BlockType.Stone), new BlockOverride(-1,9, 2,BlockType.Stone), new BlockOverride(0,9, 2,BlockType.Stone), new BlockOverride(1,9, 2,BlockType.Stone), new BlockOverride(2,9, 2,BlockType.Stone),
+
+                // ── Techo piramidal ──
+                new BlockOverride(-1,10,-1,BlockType.Stone), new BlockOverride(0,10,-1,BlockType.Stone), new BlockOverride(1,10,-1,BlockType.Stone),
+                new BlockOverride(-1,10, 0,BlockType.Stone),                                              new BlockOverride(1,10, 0,BlockType.Stone),
+                new BlockOverride(-1,10, 1,BlockType.Stone), new BlockOverride(0,10, 1,BlockType.Stone), new BlockOverride(1,10, 1,BlockType.Stone),
+                new BlockOverride( 0,11, 0,BlockType.Stone),
+
+                // ── Veleta (madera en la punta) ──
+                new BlockOverride( 0,12, 0,BlockType.Wood),
             }
         };
 
         // ─────────────────────────────────────────────────────────────────────
-        // FORTALEZA ENANA
-        // Estructura compacta, baja y robusta de piedra; solo en montaña/piedra.
-        // Muy rara.
+        // POSADA DE CAMINO
+        // Edificio rectangular de madera con tejado y establo lateral.
+        // Muy común en pasto.
         // ─────────────────────────────────────────────────────────────────────
-        public static readonly StructureDef DwarvenOutpost = new StructureDef
+        public static readonly StructureDef RoadsideInn = new StructureDef
         {
-            Name = "DwarvenOutpost",
-            SpawnChance = 0.01f,
-            MinSpacing = 240,
-            ValidSurfaces = new[] { BlockType.Stone, BlockType.Snow },
+            Name = "RoadsideInn",
+            SpawnChance = 0.038f,
+            MinSpacing = 100,
+            ValidSurfaces = new[] { BlockType.Grass },
             Blocks = new[]
             {
-                // Plataforma base 5×5
+                // ── Cuerpo principal (7×5 planta, 3 alto) ──
+                // Capa 0 – paredes exteriores
+                new BlockOverride(-3,0,-2,BlockType.Wood), new BlockOverride(-2,0,-2,BlockType.Wood), new BlockOverride(-1,0,-2,BlockType.Wood), new BlockOverride(0,0,-2,BlockType.Wood), new BlockOverride(1,0,-2,BlockType.Wood), new BlockOverride(2,0,-2,BlockType.Wood), new BlockOverride(3,0,-2,BlockType.Wood),
+                new BlockOverride(-3,0, 2,BlockType.Wood), new BlockOverride(-2,0, 2,BlockType.Wood), new BlockOverride(-1,0, 2,BlockType.Wood), new BlockOverride(0,0, 2,BlockType.Wood), new BlockOverride(1,0, 2,BlockType.Wood), new BlockOverride(2,0, 2,BlockType.Wood), new BlockOverride(3,0, 2,BlockType.Wood),
+                new BlockOverride(-3,0,-1,BlockType.Wood), new BlockOverride(-3,0, 0,BlockType.Wood), new BlockOverride(-3,0, 1,BlockType.Wood),
+                new BlockOverride( 3,0,-1,BlockType.Wood), new BlockOverride( 3,0, 0,BlockType.Wood), new BlockOverride( 3,0, 1,BlockType.Wood),
+                // Capa 1
+                new BlockOverride(-3,1,-2,BlockType.Wood), new BlockOverride(-2,1,-2,BlockType.Wood), new BlockOverride(-1,1,-2,BlockType.Wood), new BlockOverride(0,1,-2,BlockType.Wood), new BlockOverride(1,1,-2,BlockType.Wood), new BlockOverride(2,1,-2,BlockType.Wood), new BlockOverride(3,1,-2,BlockType.Wood),
+                new BlockOverride(-3,1, 2,BlockType.Wood), new BlockOverride(-2,1, 2,BlockType.Wood), new BlockOverride(-1,1, 2,BlockType.Wood), new BlockOverride(0,1, 2,BlockType.Wood), new BlockOverride(1,1, 2,BlockType.Wood), new BlockOverride(2,1, 2,BlockType.Wood), new BlockOverride(3,1, 2,BlockType.Wood),
+                new BlockOverride(-3,1,-1,BlockType.Wood), new BlockOverride(-3,1, 0,BlockType.Wood), new BlockOverride(-3,1, 1,BlockType.Wood),
+                new BlockOverride( 3,1,-1,BlockType.Wood), new BlockOverride( 3,1, 0,BlockType.Wood), new BlockOverride( 3,1, 1,BlockType.Wood),
+                // Capa 2
+                new BlockOverride(-3,2,-2,BlockType.Wood), new BlockOverride(-2,2,-2,BlockType.Wood), new BlockOverride(-1,2,-2,BlockType.Wood), new BlockOverride(0,2,-2,BlockType.Wood), new BlockOverride(1,2,-2,BlockType.Wood), new BlockOverride(2,2,-2,BlockType.Wood), new BlockOverride(3,2,-2,BlockType.Wood),
+                new BlockOverride(-3,2, 2,BlockType.Wood), new BlockOverride(-2,2, 2,BlockType.Wood), new BlockOverride(-1,2, 2,BlockType.Wood), new BlockOverride(0,2, 2,BlockType.Wood), new BlockOverride(1,2, 2,BlockType.Wood), new BlockOverride(2,2, 2,BlockType.Wood), new BlockOverride(3,2, 2,BlockType.Wood),
+                new BlockOverride(-3,2,-1,BlockType.Wood), new BlockOverride(-3,2, 0,BlockType.Wood), new BlockOverride(-3,2, 1,BlockType.Wood),
+                new BlockOverride( 3,2,-1,BlockType.Wood), new BlockOverride( 3,2, 0,BlockType.Wood), new BlockOverride( 3,2, 1,BlockType.Wood),
+
+                // ── Techo a dos aguas (piedra) ──
+                new BlockOverride(-3,3,-2,BlockType.Stone), new BlockOverride(-2,3,-2,BlockType.Stone), new BlockOverride(-1,3,-2,BlockType.Stone), new BlockOverride(0,3,-2,BlockType.Stone), new BlockOverride(1,3,-2,BlockType.Stone), new BlockOverride(2,3,-2,BlockType.Stone), new BlockOverride(3,3,-2,BlockType.Stone),
+                new BlockOverride(-3,3, 2,BlockType.Stone), new BlockOverride(-2,3, 2,BlockType.Stone), new BlockOverride(-1,3, 2,BlockType.Stone), new BlockOverride(0,3, 2,BlockType.Stone), new BlockOverride(1,3, 2,BlockType.Stone), new BlockOverride(2,3, 2,BlockType.Stone), new BlockOverride(3,3, 2,BlockType.Stone),
+                new BlockOverride(-3,3,-1,BlockType.Stone), new BlockOverride(-2,3,-1,BlockType.Stone), new BlockOverride(-1,3,-1,BlockType.Stone), new BlockOverride(0,3,-1,BlockType.Stone), new BlockOverride(1,3,-1,BlockType.Stone), new BlockOverride(2,3,-1,BlockType.Stone), new BlockOverride(3,3,-1,BlockType.Stone),
+                new BlockOverride(-3,3, 1,BlockType.Stone), new BlockOverride(-2,3, 1,BlockType.Stone), new BlockOverride(-1,3, 1,BlockType.Stone), new BlockOverride(0,3, 1,BlockType.Stone), new BlockOverride(1,3, 1,BlockType.Stone), new BlockOverride(2,3, 1,BlockType.Stone), new BlockOverride(3,3, 1,BlockType.Stone),
+                // Cresta
+                new BlockOverride(-3,4,0,BlockType.Stone), new BlockOverride(-2,4,0,BlockType.Stone), new BlockOverride(-1,4,0,BlockType.Stone), new BlockOverride(0,4,0,BlockType.Stone), new BlockOverride(1,4,0,BlockType.Stone), new BlockOverride(2,4,0,BlockType.Stone), new BlockOverride(3,4,0,BlockType.Stone),
+
+                // ── Chimenea ──
+                new BlockOverride(-2,3, 0,BlockType.Stone),
+                new BlockOverride(-2,4, 0,BlockType.Stone),
+                new BlockOverride(-2,5, 0,BlockType.Stone),
+
+                // ── Establo lateral (anexo este, 4×3, 2 alto) ──
+                new BlockOverride(4,0,-1,BlockType.Wood), new BlockOverride(5,0,-1,BlockType.Wood), new BlockOverride(6,0,-1,BlockType.Wood),
+                new BlockOverride(4,0, 1,BlockType.Wood), new BlockOverride(5,0, 1,BlockType.Wood), new BlockOverride(6,0, 1,BlockType.Wood),
+                new BlockOverride(6,0, 0,BlockType.Wood),
+                new BlockOverride(4,1,-1,BlockType.Wood), new BlockOverride(5,1,-1,BlockType.Wood), new BlockOverride(6,1,-1,BlockType.Wood),
+                new BlockOverride(4,1, 1,BlockType.Wood), new BlockOverride(5,1, 1,BlockType.Wood), new BlockOverride(6,1, 1,BlockType.Wood),
+                new BlockOverride(6,1, 0,BlockType.Wood),
+                // Techo plano del establo
+                new BlockOverride(4,2,-1,BlockType.Stone), new BlockOverride(5,2,-1,BlockType.Stone), new BlockOverride(6,2,-1,BlockType.Stone),
+                new BlockOverride(4,2, 0,BlockType.Stone), new BlockOverride(5,2, 0,BlockType.Stone), new BlockOverride(6,2, 0,BlockType.Stone),
+                new BlockOverride(4,2, 1,BlockType.Stone), new BlockOverride(5,2, 1,BlockType.Stone), new BlockOverride(6,2, 1,BlockType.Stone),
+
+                // ── Suelo interior (piedra) ──
+                new BlockOverride(-2,0,-1,BlockType.Stone), new BlockOverride(-1,0,-1,BlockType.Stone), new BlockOverride(0,0,-1,BlockType.Stone), new BlockOverride(1,0,-1,BlockType.Stone), new BlockOverride(2,0,-1,BlockType.Stone),
+                new BlockOverride(-2,0, 0,BlockType.Stone), new BlockOverride(-1,0, 0,BlockType.Stone), new BlockOverride(0,0, 0,BlockType.Stone), new BlockOverride(1,0, 0,BlockType.Stone), new BlockOverride(2,0, 0,BlockType.Stone),
+                new BlockOverride(-2,0, 1,BlockType.Stone), new BlockOverride(-1,0, 1,BlockType.Stone), new BlockOverride(0,0, 1,BlockType.Stone), new BlockOverride(1,0, 1,BlockType.Stone), new BlockOverride(2,0, 1,BlockType.Stone),
+            }
+        };
+
+        // ─────────────────────────────────────────────────────────────────────
+        // OBELISCO DEL DESIERTO
+        // Pilar cuadrado de piedra muy alto con base escalonada.
+        // Solo en arena; raro.
+        // ─────────────────────────────────────────────────────────────────────
+        public static readonly StructureDef DesertObelisk = new StructureDef
+        {
+            Name = "DesertObelisk",
+            SpawnChance = 0.013f,
+            MinSpacing = 210,
+            ValidSurfaces = new[] { BlockType.Sand },
+            Blocks = new[]
+            {
+                // ── Escalón base 5×5 ──
                 new BlockOverride(-2,0,-2,BlockType.Stone), new BlockOverride(-1,0,-2,BlockType.Stone), new BlockOverride(0,0,-2,BlockType.Stone), new BlockOverride(1,0,-2,BlockType.Stone), new BlockOverride(2,0,-2,BlockType.Stone),
                 new BlockOverride(-2,0,-1,BlockType.Stone), new BlockOverride(-1,0,-1,BlockType.Stone), new BlockOverride(0,0,-1,BlockType.Stone), new BlockOverride(1,0,-1,BlockType.Stone), new BlockOverride(2,0,-1,BlockType.Stone),
                 new BlockOverride(-2,0, 0,BlockType.Stone), new BlockOverride(-1,0, 0,BlockType.Stone), new BlockOverride(0,0, 0,BlockType.Stone), new BlockOverride(1,0, 0,BlockType.Stone), new BlockOverride(2,0, 0,BlockType.Stone),
                 new BlockOverride(-2,0, 1,BlockType.Stone), new BlockOverride(-1,0, 1,BlockType.Stone), new BlockOverride(0,0, 1,BlockType.Stone), new BlockOverride(1,0, 1,BlockType.Stone), new BlockOverride(2,0, 1,BlockType.Stone),
                 new BlockOverride(-2,0, 2,BlockType.Stone), new BlockOverride(-1,0, 2,BlockType.Stone), new BlockOverride(0,0, 2,BlockType.Stone), new BlockOverride(1,0, 2,BlockType.Stone), new BlockOverride(2,0, 2,BlockType.Stone),
 
-                // Paredes (2 alto, huecas)
-                new BlockOverride(-2,1,-2,BlockType.Stone), new BlockOverride(-1,1,-2,BlockType.Stone), new BlockOverride(0,1,-2,BlockType.Stone), new BlockOverride(1,1,-2,BlockType.Stone), new BlockOverride(2,1,-2,BlockType.Stone),
-                new BlockOverride(-2,1, 2,BlockType.Stone), new BlockOverride(-1,1, 2,BlockType.Stone), new BlockOverride(0,1, 2,BlockType.Stone), new BlockOverride(1,1, 2,BlockType.Stone), new BlockOverride(2,1, 2,BlockType.Stone),
-                new BlockOverride(-2,1,-1,BlockType.Stone), new BlockOverride(-2,1, 0,BlockType.Stone), new BlockOverride(-2,1, 1,BlockType.Stone),
-                new BlockOverride( 2,1,-1,BlockType.Stone), new BlockOverride( 2,1, 0,BlockType.Stone), new BlockOverride( 2,1, 1,BlockType.Stone),
+                // ── Escalón intermedio 3×3 ──
+                new BlockOverride(-1,1,-1,BlockType.Stone), new BlockOverride(0,1,-1,BlockType.Stone), new BlockOverride(1,1,-1,BlockType.Stone),
+                new BlockOverride(-1,1, 0,BlockType.Stone), new BlockOverride(0,1, 0,BlockType.Stone), new BlockOverride(1,1, 0,BlockType.Stone),
+                new BlockOverride(-1,1, 1,BlockType.Stone), new BlockOverride(0,1, 1,BlockType.Stone), new BlockOverride(1,1, 1,BlockType.Stone),
 
-                new BlockOverride(-2,2,-2,BlockType.Stone), new BlockOverride(-1,2,-2,BlockType.Stone), new BlockOverride(0,2,-2,BlockType.Stone), new BlockOverride(1,2,-2,BlockType.Stone), new BlockOverride(2,2,-2,BlockType.Stone),
-                new BlockOverride(-2,2, 2,BlockType.Stone), new BlockOverride(-1,2, 2,BlockType.Stone), new BlockOverride(0,2, 2,BlockType.Stone), new BlockOverride(1,2, 2,BlockType.Stone), new BlockOverride(2,2, 2,BlockType.Stone),
-                new BlockOverride(-2,2,-1,BlockType.Stone), new BlockOverride(-2,2, 0,BlockType.Stone), new BlockOverride(-2,2, 1,BlockType.Stone),
-                new BlockOverride( 2,2,-1,BlockType.Stone), new BlockOverride( 2,2, 0,BlockType.Stone), new BlockOverride( 2,2, 1,BlockType.Stone),
+                // ── Fuste 1×1 (pisos 2-11) ──
+                new BlockOverride(0,2, 0,BlockType.Stone),
+                new BlockOverride(0,3, 0,BlockType.Stone),
+                new BlockOverride(0,4, 0,BlockType.Stone),
+                new BlockOverride(0,5, 0,BlockType.Stone),
+                new BlockOverride(0,6, 0,BlockType.Stone),
+                new BlockOverride(0,7, 0,BlockType.Stone),
+                new BlockOverride(0,8, 0,BlockType.Stone),
+                new BlockOverride(0,9, 0,BlockType.Stone),
+                new BlockOverride(0,10,0,BlockType.Stone),
+                new BlockOverride(0,11,0,BlockType.Stone),
 
-                // Techo macizo
-                new BlockOverride(-2,3,-2,BlockType.Stone), new BlockOverride(-1,3,-2,BlockType.Stone), new BlockOverride(0,3,-2,BlockType.Stone), new BlockOverride(1,3,-2,BlockType.Stone), new BlockOverride(2,3,-2,BlockType.Stone),
-                new BlockOverride(-2,3,-1,BlockType.Stone), new BlockOverride(-1,3,-1,BlockType.Stone), new BlockOverride(0,3,-1,BlockType.Stone), new BlockOverride(1,3,-1,BlockType.Stone), new BlockOverride(2,3,-1,BlockType.Stone),
-                new BlockOverride(-2,3, 0,BlockType.Stone), new BlockOverride(-1,3, 0,BlockType.Stone), new BlockOverride(0,3, 0,BlockType.Stone), new BlockOverride(1,3, 0,BlockType.Stone), new BlockOverride(2,3, 0,BlockType.Stone),
-                new BlockOverride(-2,3, 1,BlockType.Stone), new BlockOverride(-1,3, 1,BlockType.Stone), new BlockOverride(0,3, 1,BlockType.Stone), new BlockOverride(1,3, 1,BlockType.Stone), new BlockOverride(2,3, 1,BlockType.Stone),
-                new BlockOverride(-2,3, 2,BlockType.Stone), new BlockOverride(-1,3, 2,BlockType.Stone), new BlockOverride(0,3, 2,BlockType.Stone), new BlockOverride(1,3, 2,BlockType.Stone), new BlockOverride(2,3, 2,BlockType.Stone),
+                // ── Pirámide cúspide ──
+                new BlockOverride(-1,12, 0,BlockType.Stone), new BlockOverride(1,12, 0,BlockType.Stone),
+                new BlockOverride( 0,12,-1,BlockType.Stone), new BlockOverride(0,12, 1,BlockType.Stone),
+                new BlockOverride( 0,12, 0,BlockType.Stone),
+                new BlockOverride( 0,13, 0,BlockType.Stone),
 
-                // Torres esquineras (2 bloques extra)
-                new BlockOverride(-2,4,-2,BlockType.Stone), new BlockOverride(-2,5,-2,BlockType.Stone),
-                new BlockOverride( 2,4,-2,BlockType.Stone), new BlockOverride( 2,5,-2,BlockType.Stone),
-                new BlockOverride(-2,4, 2,BlockType.Stone), new BlockOverride(-2,5, 2,BlockType.Stone),
-                new BlockOverride( 2,4, 2,BlockType.Stone), new BlockOverride( 2,5, 2,BlockType.Stone),
-
-                // Antorcha central en techo
-                new BlockOverride( 0,4, 0, BlockType.Glowstone),
-
-                // Forja interior (glowstone = fuego)
-                new BlockOverride( 1,1, 1, BlockType.Glowstone),
-            }
-        };
-
-        // ─────────────────────────────────────────────────────────────────────
-        // ÁRBOL ESPIRITUAL
-        // Un árbol muerto gigante con luz interna; lugar sagrado.
-        // Aparece en pasto; extremadamente raro.
-        // ─────────────────────────────────────────────────────────────────────
-        public static readonly StructureDef SpiritTree = new StructureDef
-        {
-            Name = "SpiritTree",
-            SpawnChance = 0.007f,
-            MinSpacing = 300,
-            ValidSurfaces = new[] { BlockType.Grass },
-            Blocks = new[]
-            {
-                // Raíces
-                new BlockOverride(-2, 0,  0, BlockType.Wood), new BlockOverride(-1, 0,  1, BlockType.Wood),
-                new BlockOverride( 2, 0,  0, BlockType.Wood), new BlockOverride( 1, 0, -1, BlockType.Wood),
-                new BlockOverride( 0, 0,  2, BlockType.Wood), new BlockOverride(-1, 0, -2, BlockType.Wood),
-
-                // Tronco grueso (3×3 en base, luego va adelgazando)
-                new BlockOverride(-1, 1, -1, BlockType.Wood), new BlockOverride(0, 1, -1, BlockType.Wood), new BlockOverride(1, 1, -1, BlockType.Wood),
-                new BlockOverride(-1, 1,  0, BlockType.Wood), new BlockOverride(0, 1,  0, BlockType.Wood), new BlockOverride(1, 1,  0, BlockType.Wood),
-                new BlockOverride(-1, 1,  1, BlockType.Wood), new BlockOverride(0, 1,  1, BlockType.Wood), new BlockOverride(1, 1,  1, BlockType.Wood),
-
-                new BlockOverride(-1, 2, -1, BlockType.Wood), new BlockOverride(0, 2, -1, BlockType.Wood), new BlockOverride(1, 2, -1, BlockType.Wood),
-                new BlockOverride(-1, 2,  0, BlockType.Wood), new BlockOverride(0, 2,  0, BlockType.Wood), new BlockOverride(1, 2,  0, BlockType.Wood),
-                new BlockOverride(-1, 2,  1, BlockType.Wood), new BlockOverride(0, 2,  1, BlockType.Wood), new BlockOverride(1, 2,  1, BlockType.Wood),
-
-                new BlockOverride( 0, 3,  0, BlockType.Wood), new BlockOverride(-1, 3, 0, BlockType.Wood), new BlockOverride(1, 3, 0, BlockType.Wood),
-                new BlockOverride( 0, 3, -1, BlockType.Wood), new BlockOverride( 0, 3, 1, BlockType.Wood),
-
-                new BlockOverride( 0, 4,  0, BlockType.Wood),
-                new BlockOverride( 0, 5,  0, BlockType.Wood),
-                new BlockOverride( 0, 6,  0, BlockType.Wood),
-                new BlockOverride( 0, 7,  0, BlockType.Wood),
-
-                // Ramas
-                new BlockOverride(-2, 5,  0, BlockType.Wood), new BlockOverride(-3, 5,  0, BlockType.Wood), new BlockOverride(-3, 6, 0, BlockType.Wood),
-                new BlockOverride( 2, 5,  0, BlockType.Wood), new BlockOverride( 3, 5,  0, BlockType.Wood), new BlockOverride( 3, 6, 0, BlockType.Wood),
-                new BlockOverride( 0, 5,  2, BlockType.Wood), new BlockOverride( 0, 5,  3, BlockType.Wood), new BlockOverride( 0, 6, 3, BlockType.Wood),
-                new BlockOverride( 0, 6, -2, BlockType.Wood), new BlockOverride( 0, 7, -3, BlockType.Wood),
-
-                // Luz espiritual (glowstone en las ramas y en el hueco del tronco)
-                new BlockOverride( 0, 2,  0, BlockType.Glowstone),
-                new BlockOverride(-3, 7,  0, BlockType.Glowstone),
-                new BlockOverride( 3, 7,  0, BlockType.Glowstone),
-                new BlockOverride( 0, 6,  3, BlockType.Glowstone),
-                new BlockOverride( 0, 8, -3, BlockType.Glowstone),
-                new BlockOverride( 0, 8,  0, BlockType.Glowstone),
+                // ── Escombros y arena acumulada alrededor ──
+                new BlockOverride( 3,0, 0,BlockType.Stone),
+                new BlockOverride(-3,0, 1,BlockType.Stone),
+                new BlockOverride( 2,0, 3,BlockType.Stone),
+                new BlockOverride(-2,0,-3,BlockType.Stone), new BlockOverride(-1,0,-3,BlockType.Stone),
+                new BlockOverride( 0,0, 4,BlockType.Stone),
             }
         };
 
@@ -575,17 +417,11 @@ namespace game
         // ─────────────────────────────────────────────────────────────────────
         public static readonly StructureDef[] All =
         {
-            BanditCamp,
-            WatchTower,
-            PeasantHut,
-            ForgottenGrave,
-            VillageWell,
-            AncientTemple,
-            RunicMonolith,
-            ShipwreckHull,
-            ArcanePortal,
-            DwarvenOutpost,
-            SpiritTree,
+            RuinedCastle,
+            StrandedGalleon,
+            ClockTower,
+            RoadsideInn,
+            DesertObelisk,
         };
     }
 }

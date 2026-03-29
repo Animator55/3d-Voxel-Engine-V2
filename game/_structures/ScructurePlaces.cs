@@ -5,9 +5,21 @@ namespace game
 {
     public static class StructurePlacer
     {
-        // OVERLAP_RADIUS debe cubrir el MinSpacing más grande.
-        // Con chunkSize=32 y MinSpacing máximo de ~180: 180/32+1 ≈ 7.
-        private const int OVERLAP_RADIUS = 7;
+        // Radio calculado dinámicamente a partir del MinSpacing más alto de todas
+        // las estructuras registradas. Se recalcula una sola vez al primer uso.
+        private static int? _overlapRadius;
+        private static int OverlapRadius(int chunkSize)
+        {
+            if (_overlapRadius.HasValue) return _overlapRadius.Value;
+
+            int maxSpacing = 0;
+            foreach (var def in Structures.All)
+                if (def.MinSpacing > maxSpacing) maxSpacing = def.MinSpacing;
+
+            // +1 para absorber el jitter de posición dentro del chunk.
+            _overlapRadius = maxSpacing / chunkSize + 1;
+            return _overlapRadius.Value;
+        }
 
         public static List<StructurePlacement> GetStructuresForChunk(
             int chunkX, int chunkY, int chunkZ, int chunkSize,
@@ -15,9 +27,10 @@ namespace game
             Func<float, float, byte> getSurfaceBlock)
         {
             var result = new List<StructurePlacement>();
+            int radius = OverlapRadius(chunkSize);
 
-            for (int ox = -OVERLAP_RADIUS; ox <= OVERLAP_RADIUS; ox++)
-                for (int oz = -OVERLAP_RADIUS; oz <= OVERLAP_RADIUS; oz++)
+            for (int ox = -radius; ox <= radius; ox++)
+                for (int oz = -radius; oz <= radius; oz++)
                 {
                     int cx = chunkX + ox, cz = chunkZ + oz;
 
@@ -33,7 +46,6 @@ namespace game
                         int wz = cz * chunkSize + jz;
                         int wy = getTerrainHeight(wx, wz);
 
-                        // Verificar que al menos parte de la estructura caiga en este chunk Y.
                         int structBaseY = wy + 1;
                         int chunkWorldYMin = chunkY * chunkSize;
                         int chunkWorldYMax = chunkWorldYMin + chunkSize - 1;
@@ -46,14 +58,13 @@ namespace game
 
                         if (structTopY < chunkWorldYMin || structBaseY > chunkWorldYMax) continue;
 
-                        // ValidSurfaces check
                         byte surface = getSurfaceBlock(wx, wz);
                         bool validSurface = false;
                         foreach (var vs in def.ValidSurfaces)
                             if (vs == surface) { validSurface = true; break; }
                         if (!validSurface) continue;
 
-                        if (!IsSpacingOk(def, wx, wz, cx, cz, chunkSize, seed)) continue;
+                        if (!IsSpacingOk(def, wx, wz, cx, cz, chunkSize, seed, radius)) continue;
 
                         result.Add(new StructurePlacement(def.Name, wx, wy, wz, def.Blocks));
                     }
@@ -90,9 +101,10 @@ namespace game
 
         private static bool IsSpacingOk(StructureDef def, int wx, int wz,
                                          int selfCx, int selfCz,
-                                         int chunkSize, int seed)
+                                         int chunkSize, int seed, int radius)
         {
-            int halfSpacing = Math.Min(def.MinSpacing / chunkSize + 1, OVERLAP_RADIUS);
+            // Usamos el mismo radio global para no perder candidatos lejanos.
+            int halfSpacing = Math.Min(def.MinSpacing / chunkSize + 1, radius);
 
             for (int ox = -halfSpacing; ox <= halfSpacing; ox++)
                 for (int oz = -halfSpacing; oz <= halfSpacing; oz++)

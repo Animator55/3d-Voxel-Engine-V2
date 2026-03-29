@@ -27,26 +27,26 @@ namespace game
     public sealed class Entity
     {
         // ── Identidad ─────────────────────────────────────────────────
-        public readonly int              InstanceId;
+        public readonly int InstanceId;
         public readonly EntityDefinition Definition;
 
         // ── Física ────────────────────────────────────────────────────
         public Vector3 Position;
         public Vector3 Velocity;
-        public float   Facing;          // yaw en radianes
-        public bool    IsGrounded;
+        public float Facing;          // yaw en radianes
+        public bool IsGrounded;
 
         // ── Visual ─────────────────────────────────────────────────────
         /// <summary>Posición suavizada para el renderer (bob, step-up, etc.)</summary>
         public Vector3 VisualPosition { get; private set; }
-        private float  _visualYDebt;
+        private float _visualYDebt;
 
         /// <summary>0-1: progreso de animación de muerte.</summary>
         public float DeathAnimProgress { get; private set; }
 
         // ── Stats ─────────────────────────────────────────────────────
         public float CurrentHealth { get; private set; }
-        public float MaxHealth     => Definition.MaxHealth;
+        public float MaxHealth => Definition.MaxHealth;
 
         // ── Vida ──────────────────────────────────────────────────────
         public EntityLifeState LifeState { get; private set; } = EntityLifeState.Alive;
@@ -61,8 +61,11 @@ namespace game
         private float _iFrameTimer = 0f;
 
         // ── Hitstop visual ────────────────────────────────────────────
-        public  float HitFlashTimer { get; private set; } = 0f;
+        public float HitFlashTimer { get; private set; } = 0f;
         private const float HitFlashDuration = 0.12f;
+
+        public float HealthBarTimer { get; private set; } = 0f;
+        private const float HealthBarDuration = 4f;
 
         // ── Eventos (suscritos por EntityManager) ─────────────────────
         /// <summary>Lanzado justo después de recibir daño (position, amount).</summary>
@@ -74,12 +77,12 @@ namespace game
         // ─────────────────────────────────────────────────────────────
         public Entity(int instanceId, EntityDefinition definition, Vector3 spawnPosition)
         {
-            InstanceId      = instanceId;
-            Definition      = definition;
-            Position        = spawnPosition;
-            VisualPosition  = spawnPosition;
-            CurrentHealth   = definition.MaxHealth;
-            _ai             = EntityAIFactory.Create(definition.AIType);
+            InstanceId = instanceId;
+            Definition = definition;
+            Position = spawnPosition;
+            VisualPosition = spawnPosition;
+            CurrentHealth = definition.MaxHealth;
+            _ai = EntityAIFactory.Create(definition.AIType);
         }
 
         // ─────────────────────────────────────────────────────────────
@@ -99,7 +102,7 @@ namespace game
             // ── Animación de muerte ───────────────────────────────────
             if (LifeState == EntityLifeState.Dying)
             {
-                _deathTimer      += dt;
+                _deathTimer += dt;
                 DeathAnimProgress = Math.Min(_deathTimer / DeathAnimDuration, 1f);
                 if (_deathTimer >= DeathAnimDuration)
                     LifeState = EntityLifeState.Dead;
@@ -109,8 +112,9 @@ namespace game
             if (LifeState == EntityLifeState.Dead) return;
 
             // ── Timers ────────────────────────────────────────────────
-            _iFrameTimer  = Math.Max(0f, _iFrameTimer  - dt);
+            _iFrameTimer = Math.Max(0f, _iFrameTimer - dt);
             HitFlashTimer = Math.Max(0f, HitFlashTimer - dt);
+            HealthBarTimer = Math.Max(0f, HealthBarTimer - dt);
 
             // ── IA ────────────────────────────────────────────────────
             // Corre siempre: mantiene estado consistente aunque no haya física.
@@ -132,7 +136,7 @@ namespace game
                     // Congelar eje Y: limpiar velocidad vertical y marcar grounded
                     // para que no acumule caída libre durante segundos.
                     Velocity.Y = 0f;
-                    IsGrounded  = true;
+                    IsGrounded = true;
 
                     // Movimiento horizontal de IA sin colisiones: aceptable porque
                     // en zona LP el terreno es relativamente plano y el error es
@@ -161,9 +165,10 @@ namespace game
             if (LifeState != EntityLifeState.Alive) return false;
             if (_iFrameTimer > 0f) return false;
 
-            CurrentHealth  = Math.Max(0f, CurrentHealth - amount);
-            _iFrameTimer   = IFrameDuration;
-            HitFlashTimer  = HitFlashDuration;
+            CurrentHealth = Math.Max(0f, CurrentHealth - amount);
+            _iFrameTimer = IFrameDuration;
+            HitFlashTimer = HitFlashDuration;
+            HealthBarTimer = HealthBarDuration;
 
             _ai?.OnDamaged(this, amount, sourcePosition);
             OnDamaged?.Invoke(Position, amount);
@@ -191,9 +196,9 @@ namespace game
         // ─────────────────────────────────────────────────────────────
         //  Física básica (gravedad + colisión AABB contra el mundo)
         // ─────────────────────────────────────────────────────────────
-        private const float Gravity      = -20f;
+        private const float Gravity = -20f;
         private const float MaxFallSpeed = 40f;
-        private const float MaxStepSize  = 0.35f;
+        private const float MaxStepSize = 0.35f;
 
         private void ApplyPhysics(float dt, ChunkManager chunkManager)
         {
@@ -248,8 +253,8 @@ namespace game
 
         private bool Collides(Vector3 feetPos, ChunkManager chunkManager)
         {
-            float hw   = Definition.CollisionRadius;
-            float h    = Definition.CollisionHeight;
+            float hw = Definition.CollisionRadius;
+            float h = Definition.CollisionHeight;
             const float eps = 0.001f;
 
             int x0 = (int)Math.Floor(feetPos.X - hw);
@@ -260,14 +265,14 @@ namespace game
             int z1 = (int)Math.Floor(feetPos.Z + hw - eps);
 
             for (int x = x0; x <= x1; x++)
-            for (int y = y0; y <= y1; y++)
-            for (int z = z0; z <= z1; z++)
-            {
-                byte b = chunkManager.GetBlockAtWorldPosition(
-                    new Vector3(x + 0.5f, y + 0.5f, z + 0.5f));
-                if (b != BlockType.Air && b != BlockType.AirCave && b != BlockType.Water)
-                    return true;
-            }
+                for (int y = y0; y <= y1; y++)
+                    for (int z = z0; z <= z1; z++)
+                    {
+                        byte b = chunkManager.GetBlockAtWorldPosition(
+                            new Vector3(x + 0.5f, y + 0.5f, z + 0.5f));
+                        if (b != BlockType.Air && b != BlockType.AirCave && b != BlockType.Water)
+                            return true;
+                    }
             return false;
         }
 
@@ -281,12 +286,12 @@ namespace game
             if (_visualYDebt > 0f)
             {
                 float recover = Math.Min(_visualYDebt, StepSmoothSpeed * dt);
-                _visualYDebt  = Math.Max(0f, _visualYDebt - recover);
+                _visualYDebt = Math.Max(0f, _visualYDebt - recover);
                 VisualPosition = new Vector3(Position.X, Position.Y - _visualYDebt, Position.Z);
             }
             else
             {
-                _visualYDebt   = 0f;
+                _visualYDebt = 0f;
                 VisualPosition = Position;
             }
         }
